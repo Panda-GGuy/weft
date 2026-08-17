@@ -45,6 +45,21 @@ public final class WeftMod {
                 services.onLevelTickPost(e);
             }
         });
+        NeoForge.EVENT_BUS.addListener((net.neoforged.neoforge.event.entity.EntityJoinLevelEvent e) -> {
+            if (services != null) {
+                services.onEntityJoin(e);
+            }
+        });
+        NeoForge.EVENT_BUS.addListener((net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent e) -> {
+            if (services != null) {
+                services.onEntityLeave(e);
+            }
+        });
+        NeoForge.EVENT_BUS.addListener((net.neoforged.neoforge.event.entity.EntityEvent.EnteringSection e) -> {
+            if (services != null) {
+                services.onEnteringSection(e);
+            }
+        });
     }
 
     /** P1 service status for {@code /weft services}; empty before server start. */

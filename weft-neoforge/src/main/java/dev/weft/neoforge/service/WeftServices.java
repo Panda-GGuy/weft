@@ -1,11 +1,15 @@
 package dev.weft.neoforge.service;
 
 import dev.weft.engine.service.AsyncServiceRunner;
+import dev.weft.engine.service.EntityCensus;
 import dev.weft.neoforge.WeftConfig;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.MobCategory;
+import net.neoforged.neoforge.event.entity.EntityEvent;
+import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
+import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
 import net.neoforged.neoforge.event.tick.LevelTickEvent;
 
 import java.util.ArrayList;
@@ -38,6 +42,16 @@ public final class WeftServices implements AutoCloseable {
         final AtomicLong captureNanosLast = new AtomicLong();
         volatile String lastMismatch = "";
 
+        // Incremental census (server-thread-only): event-fed candidate to
+        // replace the O(population) capture. Runs in drift-measurement mode:
+        // reconciled against the full capture periodically; the drift numbers
+        // are the go/no-go evidence for trusting events (taming/name-tagging
+        // fires no event, so some drift is expected — we measure how much).
+        final EntityCensus census = new EntityCensus(CATEGORY_COUNT);
+        final AtomicLong reconciles = new AtomicLong();
+        final AtomicLong driftTotal = new AtomicLong();
+        volatile String lastDrift = "";
+
         LevelServices(String levelId) {
             this.spawnDensity = AsyncServiceRunner.withDedicatedWorker(new SpawnDensityService(levelId));
         }
@@ -45,13 +59,52 @@ public final class WeftServices implements AutoCloseable {
 
     private final Map<String, LevelServices> byLevel = new ConcurrentHashMap<>();
 
+    /** The skip rules of NaturalSpawner.createState, minus the chunk gate. */
+    private static MobCategory capCategoryOf(Entity entity) {
+        if (entity instanceof Mob mob
+                && (mob.isPersistenceRequired() || mob.requiresCustomPersistence())) {
+            return null;
+        }
+        MobCategory category = entity.getClassification(true);
+        return category == MobCategory.MISC ? null : category;
+    }
+
+    private LevelServices servicesOf(ServerLevel level) {
+        return byLevel.computeIfAbsent(level.dimension().location().toString(), LevelServices::new);
+    }
+
+    // --- census event feed (server thread; drift-measurement mode) ---
+
+    public void onEntityJoin(EntityJoinLevelEvent event) {
+        if (WeftConfig.SPAWN_SERVICE_SHADOW && event.getLevel() instanceof ServerLevel level) {
+            MobCategory category = capCategoryOf(event.getEntity());
+            if (category != null) {
+                servicesOf(level).census.add(event.getEntity().getId(), category.ordinal(),
+                        event.getEntity().chunkPosition().toLong());
+            }
+        }
+    }
+
+    public void onEntityLeave(EntityLeaveLevelEvent event) {
+        if (WeftConfig.SPAWN_SERVICE_SHADOW && event.getLevel() instanceof ServerLevel level) {
+            servicesOf(level).census.remove(event.getEntity().getId());
+        }
+    }
+
+    public void onEnteringSection(EntityEvent.EnteringSection event) {
+        if (WeftConfig.SPAWN_SERVICE_SHADOW && event.didChunkChange()
+                && event.getEntity().level() instanceof ServerLevel level) {
+            servicesOf(level).census.move(event.getEntity().getId(),
+                    event.getNewPos().chunk().toLong());
+        }
+    }
+
     /** Wired to {@code LevelTickEvent.Post} on the game bus. */
     public void onLevelTickPost(LevelTickEvent.Post event) {
         if (!WeftConfig.SPAWN_SERVICE_SHADOW || !(event.getLevel() instanceof ServerLevel level)) {
             return;
         }
-        LevelServices services = byLevel.computeIfAbsent(
-                level.dimension().location().toString(), LevelServices::new);
+        LevelServices services = servicesOf(level);
 
         // --- capture (server thread; mirrors createState exactly) ---
         // Skip rules cross-checked against the decompiled 1.21.1 source:
@@ -60,16 +113,13 @@ public final class WeftServices implements AutoCloseable {
         // they count toward caps), and an entity only counts if its chunk
         // resolves as a full chunk (the ChunkGetter.query gate).
         long t0 = System.nanoTime();
+        int[] ids = new int[256];
         int[] categories = new int[256];
         long[] chunkKeys = new long[256];
         int size = 0;
         for (Entity entity : level.getAllEntities()) {
-            if (entity instanceof Mob mob
-                    && (mob.isPersistenceRequired() || mob.requiresCustomPersistence())) {
-                continue;
-            }
-            MobCategory category = entity.getClassification(true);
-            if (category == MobCategory.MISC) {
+            MobCategory category = capCategoryOf(entity);
+            if (category == null) {
                 continue;
             }
             var chunkPos = entity.chunkPosition();
@@ -77,14 +127,30 @@ public final class WeftServices implements AutoCloseable {
                 continue;
             }
             if (size == categories.length) {
+                ids = java.util.Arrays.copyOf(ids, size * 2);
                 categories = java.util.Arrays.copyOf(categories, size * 2);
                 chunkKeys = java.util.Arrays.copyOf(chunkKeys, size * 2);
             }
+            ids[size] = entity.getId();
             categories[size] = category.ordinal();
             chunkKeys[size] = chunkPos.toLong();
             size++;
         }
         services.captureNanosLast.set(System.nanoTime() - t0);
+
+        // --- census drift measurement: reconcile against the capture ---
+        // (the capture is ground truth; drift = what the event feed missed,
+        // e.g. persistence flips from taming, which fire no event)
+        if (WeftConfig.CENSUS_RECONCILE_INTERVAL_TICKS > 0
+                && level.getGameTime() % WeftConfig.CENSUS_RECONCILE_INTERVAL_TICKS == 0) {
+            EntityCensus.Drift drift = services.census.reconcile(ids, categories, chunkKeys, size);
+            services.reconciles.incrementAndGet();
+            if (drift.total() > 0) {
+                services.driftTotal.addAndGet(drift.total());
+                services.lastDrift = String.format("missing %d, stale %d, moved %d",
+                        drift.missing(), drift.stale(), drift.moved());
+            }
+        }
 
         // --- parity check: previous tick's async result vs vanilla's fresh state ---
         var previous = services.spawnDensity.latest();
@@ -135,6 +201,11 @@ public final class WeftServices implements AutoCloseable {
                     ticks == 0 ? 100.0 : 100.0 * (ticks - mismatches) / ticks,
                     mismatches == 0 ? "" : " last: " + s.lastMismatch,
                     s.spawnDensity.failureCount()));
+            lines.add(String.format(
+                    "  census: %d tracked, drift %d over %d reconciles%s",
+                    s.census.trackedCount(),
+                    s.driftTotal.get(), s.reconciles.get(),
+                    s.lastDrift.isEmpty() ? "" : " (last: " + s.lastDrift + ")"));
         });
         return lines;
     }

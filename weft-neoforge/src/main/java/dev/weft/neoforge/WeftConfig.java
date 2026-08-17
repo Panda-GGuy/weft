@@ -52,6 +52,11 @@ public final class WeftConfig {
                     "/weft services.")
             .define("spawnServiceShadow", true);
 
+    private static final ModConfigSpec.IntValue CENSUS_RECONCILE_INTERVAL_TICKS_SPEC = BUILDER
+            .comment("How often (ticks) the incremental entity census is reconciled against a",
+                    "full scan. Drift numbers appear in /weft services. 0 = census disabled.")
+            .defineInRange("censusReconcileIntervalTicks", 200, 0, Integer.MAX_VALUE);
+
     private static final ModConfigSpec.ConfigValue<List<? extends Integer>> SPEEDUP_WORKER_COUNTS_SPEC = BUILDER
             .comment("Worker counts to estimate hypothetical speedup for.")
             .defineListAllowEmpty("speedupWorkerCounts", List.of(2, 4, 8, 16),
@@ -68,6 +73,7 @@ public final class WeftConfig {
     public static volatile int REPORT_LOG_INTERVAL_TICKS = 1200;
     public static volatile int REPORT_TOP_TYPES = 12;
     public static volatile boolean SPAWN_SERVICE_SHADOW = true;
+    public static volatile int CENSUS_RECONCILE_INTERVAL_TICKS = 200;
     public static volatile int[] SPEEDUP_WORKER_COUNTS = {2, 4, 8, 16};
 
     /** Wired to the mod event bus in {@link WeftMod}. */
@@ -82,6 +88,7 @@ public final class WeftConfig {
         REPORT_LOG_INTERVAL_TICKS = REPORT_LOG_INTERVAL_TICKS_SPEC.get();
         REPORT_TOP_TYPES = REPORT_TOP_TYPES_SPEC.get();
         SPAWN_SERVICE_SHADOW = SPAWN_SERVICE_SHADOW_SPEC.get();
+        CENSUS_RECONCILE_INTERVAL_TICKS = CENSUS_RECONCILE_INTERVAL_TICKS_SPEC.get();
         SPEEDUP_WORKER_COUNTS = SPEEDUP_WORKER_COUNTS_SPEC.get().stream()
                 .mapToInt(Integer::intValue).toArray();
     }
