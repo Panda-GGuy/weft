@@ -14,7 +14,9 @@ unverified mods with exact single-threaded semantics so existing mods keep
 working, unmodified.
 
 Read [RFC-0001](docs/RFC-0001-weft-architecture.md) first. It is the design
-authority for everything in this repo.
+authority for everything in this repo. Design notes, decisions, findings, and
+the testing playbook live on the
+[project wiki](https://github.com/Panda-GGuy/weft/wiki).
 
 ## Modules
 
