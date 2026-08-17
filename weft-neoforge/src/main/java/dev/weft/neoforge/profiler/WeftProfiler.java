@@ -36,6 +36,17 @@ public final class WeftProfiler {
     private final ArrayDeque<Long> nanoStack = new ArrayDeque<>();
     private long tickCounter;
 
+    /**
+     * Thread confinement (learned the hard way): in single player the CLIENT
+     * level ticks its block entities through the same
+     * {@code LevelChunk$BoundTickingBlockEntity} wrapper our mixin hooks, so
+     * hooks fire on the client thread too. Concurrent access corrupted the
+     * deque (AIOOBE crash) and polluted samples with client-side timings.
+     * Only the thread that runs {@link #onTickStart} (the server thread, via
+     * MinecraftServerMixin) may record; all other threads no-op.
+     */
+    private volatile Thread serverThread;
+
     private WeftProfiler() {}
 
     public static WeftProfiler get() {
@@ -44,6 +55,7 @@ public final class WeftProfiler {
 
     /** Called from MinecraftServerMixin at the top of every server tick. */
     public void onTickStart() {
+        serverThread = Thread.currentThread();
         tickCounter++;
         // Leak protection: any start times stranded by an exception path
         // between HEAD and RETURN hooks die with the tick they belong to.
@@ -62,7 +74,7 @@ public final class WeftProfiler {
     // --- timing hooks (server thread only; stack handles nesting) ---
 
     public void push() {
-        if (!WeftConfig.PROFILING_ENABLED) {
+        if (!WeftConfig.PROFILING_ENABLED || Thread.currentThread() != serverThread) {
             return;
         }
         nanoStack.push(System.nanoTime());
@@ -76,8 +88,13 @@ public final class WeftProfiler {
         pop(TickSample.Source.BLOCK_ENTITY, typeId, chunkKey);
     }
 
+    /** Work with no spatial home — serial under Weft (the Amdahl bucket). */
+    public void popGlobal(String typeId) {
+        pop(TickSample.Source.GLOBAL, typeId, TickSample.NO_CHUNK);
+    }
+
     private void pop(TickSample.Source source, String typeId, long chunkKey) {
-        if (!WeftConfig.PROFILING_ENABLED) {
+        if (!WeftConfig.PROFILING_ENABLED || Thread.currentThread() != serverThread) {
             return;
         }
         // poll() is null on empty: tolerates a toggle-on between HEAD and
