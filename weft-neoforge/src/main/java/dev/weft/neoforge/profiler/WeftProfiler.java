@@ -134,6 +134,16 @@ public final class WeftProfiler {
         return prefix + ReportFormatter.format(report, window.size());
     }
 
+    /**
+     * Raw completed-tick window, oldest first (WS-8 benchmark harness: the
+     * load generator sums per-{@link TickSample.Source} nanos over a tick
+     * range instead of going through the report). Safe from any thread.
+     */
+    public List<TickProfiler.TickRecord> snapshotWindow() {
+        TickProfiler p = profiler;
+        return p == null ? List.of() : p.snapshotWindow();
+    }
+
     /** Write the report next to the server/world files; returns the path. */
     public Path writeReportFile(Path gameDir) throws IOException {
         Path out = gameDir.resolve("weft-report.txt");

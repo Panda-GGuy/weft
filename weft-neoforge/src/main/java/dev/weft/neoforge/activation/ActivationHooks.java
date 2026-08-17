@@ -110,6 +110,17 @@ public final class ActivationHooks {
         return run;
     }
 
+    /** Point-in-time view of the throttle counters (WS-8 benchmark deltas). */
+    public record Counters(long decisions, long skips) {
+        public Counters minus(Counters earlier) {
+            return new Counters(decisions - earlier.decisions, skips - earlier.skips);
+        }
+    }
+
+    public static Counters counters() {
+        return new Counters(throttleDecisions.sum(), throttleSkips.sum());
+    }
+
     /** Extra detail for the posture report / {@code /weft status}. */
     public static String statusDetail() {
         long decisions = throttleDecisions.sum();

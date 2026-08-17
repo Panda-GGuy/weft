@@ -1,10 +1,17 @@
 name: bench
 
-# WS-8 (RFC-0002): nightly JMH run over the engine hot paths. Results are
-# recorded on the bench-data branch; the job FAILS when any benchmark
-# regresses beyond the noise band vs the last recorded run. Shared runners
-# are noisy, hence the generous 150% threshold - this gate catches real
-# regressions (an accidental O(n^2), a new allocation storm), not 5% drift.
+# WS-8 (RFC-0002): the nightly benchmark gates.
+#   jmh         - engine hot paths (mailboxes, merge/split, pipeline, graph).
+#   world-bench - the reproducible benchmark world + headless GameTest load
+#                 generator: WS-1 acceptance (2k passive + 500 hostile mobs,
+#                 >=30% entity-phase cut, near-player parity) is asserted
+#                 inside the gametest itself; the measured numbers join the
+#                 same regression tracking as the JMH results.
+# Results are recorded on the bench-data branch; a job FAILS when any
+# benchmark regresses beyond the noise band vs the last recorded run. Shared
+# runners are noisy, hence the generous 150% threshold - this gate catches
+# real regressions (an accidental O(n^2), a new allocation storm), not 5%
+# drift.
 on:
   schedule:
     - cron: '17 3 * * *'
@@ -41,6 +48,39 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           gh-pages-branch: bench-data
           benchmark-data-dir-path: dev/bench
+          auto-push: true
+          fail-on-alert: true
+          alert-threshold: '150%'
+          summary-always: true
+
+  world-bench:
+    name: "Benchmark world regression gate"
+    runs-on: ubuntu-latest
+    # Serialized after jmh: both jobs auto-push to the bench-data branch and
+    # concurrent pushes race. Runs even when jmh's gate trips.
+    needs: jmh
+    if: ${{ !cancelled() }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Run the benchmark world (headless GameTest load generator)
+        run: gradle :weft-neoforge:runGameTestServer -PwithNeoForge --console=plain
+      - name: Show benchmark results
+        if: always()
+        run: cat weft-neoforge/run/gametest/weft-bench.json || true
+      - name: Compare against recorded baseline
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: Weft world bench
+          tool: 'customSmallerIsBetter'
+          output-file-path: weft-neoforge/run/gametest/weft-bench.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          gh-pages-branch: bench-data
+          benchmark-data-dir-path: dev/bench-world
           auto-push: true
           fail-on-alert: true
           alert-threshold: '150%'
