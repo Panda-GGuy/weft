@@ -106,7 +106,7 @@ public final class WeftModules {
                         + "territory ({}). Choose one: remove the other mod, or disable this module "
                         + "via forceDisableModules in weft-common.toml.", def.id(), resolution.detail());
             }
-            lines.add(String.format("  %-13s %-11s %s", def.id(),
+            lines.add(String.format("  %-16s %-13s %s", def.id(),
                     label(resolution.state()),
                     detailFor(def, resolution, postures)).stripTrailing());
         }

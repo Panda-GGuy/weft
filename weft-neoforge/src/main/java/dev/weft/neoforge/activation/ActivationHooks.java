@@ -65,19 +65,18 @@ public final class ActivationHooks {
     }
 
     /**
-     * Called from the {@code Mob.serverAiStep} HEAD hook on the ticking
-     * (server) thread. True = run AI this tick (the vanilla answer).
+     * The interval the configured tiers assign this mob where it stands:
+     * 1 = full rate / exempt / mid-fight. Independent of the module's active
+     * flag and of the throttle mixin having applied — the P0 report uses it
+     * to project WS-1 savings on packs that haven't enabled anything yet.
      */
-    public static boolean shouldTickAi(Mob mob) {
-        if (!active) {
-            return true;
-        }
+    public static int projectedInterval(Mob mob) {
         // Built-in exemptions (RFC-0002 WS-1): raid mobs, and anything with a
         // live attack target - a mob mid-fight never loses ticks, so "targeting
         // a player" is covered with room to spare.
         if (mob.getTarget() != null || mob instanceof Raider
                 || !(mob.level() instanceof ServerLevel level)) {
-            return true;
+            return 1;
         }
         double distSq = Double.POSITIVE_INFINITY;
         for (ServerPlayer player : level.players()) {
@@ -87,12 +86,24 @@ public final class ActivationHooks {
         }
         String typeId = TYPE_IDS.computeIfAbsent(mob.getType(),
                 type -> BuiltInRegistries.ENTITY_TYPE.getKey(type).toString());
-        int interval = scheduler.intervalFor(typeId, distSq);
+        return scheduler.intervalFor(typeId, distSq);
+    }
+
+    /**
+     * Called from the {@code Mob.serverAiStep} HEAD hook on the ticking
+     * (server) thread. True = run AI this tick (the vanilla answer).
+     */
+    public static boolean shouldTickAi(Mob mob) {
+        if (!active) {
+            return true;
+        }
+        int interval = projectedInterval(mob);
         if (interval <= 1) {
             return true;
         }
         throttleDecisions.increment();
-        boolean run = ActivationScheduler.shouldRunThisTick(level.getGameTime(), mob.getId(), interval);
+        boolean run = ActivationScheduler.shouldRunThisTick(
+                mob.level().getGameTime(), mob.getId(), interval);
         if (!run) {
             throttleSkips.increment();
         }

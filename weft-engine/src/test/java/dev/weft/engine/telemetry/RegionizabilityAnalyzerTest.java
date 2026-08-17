@@ -78,6 +78,37 @@ class RegionizabilityAnalyzerTest {
     }
 
     @Test
+    void activationProjectionSumsSkippedShareOfThrottleableCost() {
+        List<TickSample> samples = List.of(
+                // Near a player: interval 1, never counted as throttleable.
+                new TickSample(TickSample.Source.ENTITY, "minecraft:cow",
+                        ChunkKey.pack(0, 0), 4_000_000, 1),
+                // Reduced tier at interval 4: saves 3/4 of its cost.
+                new TickSample(TickSample.Source.ENTITY, "minecraft:cow",
+                        ChunkKey.pack(3, 0), 4_000_000, 4),
+                // Far tier at interval 20: saves 19/20.
+                new TickSample(TickSample.Source.ENTITY, "minecraft:sheep",
+                        ChunkKey.pack(6, 0), 2_000_000, 20),
+                // Global work never projects.
+                new TickSample(TickSample.Source.GLOBAL, "global:time",
+                        TickSample.NO_CHUNK, 1_000_000));
+        RegionizabilityAnalyzer.Report r =
+                new RegionizabilityAnalyzer(2, new int[]{2}, 10).analyze(samples);
+
+        assertEquals(6_000_000, r.throttleableNanos(), "interval>1 entity cost only");
+        assertEquals(3_000_000 + 1_900_000, r.activationSavedNanos(),
+                "nanos * (interval-1)/interval per sample");
+    }
+
+    @Test
+    void legacySamplesProjectNoActivationSavings() {
+        RegionizabilityAnalyzer.Report r = new RegionizabilityAnalyzer(2, new int[]{2}, 10)
+                .analyze(List.of(entity("mod:machine", 0, 0, 5_000_000)));
+        assertEquals(0, r.throttleableNanos());
+        assertEquals(0, r.activationSavedNanos());
+    }
+
+    @Test
     void lptMakespanSchedulesLargestFirst() {
         List<RegionizabilityAnalyzer.RegionCost> regions = List.of(
                 new RegionizabilityAnalyzer.RegionCost(1, 1, 8),

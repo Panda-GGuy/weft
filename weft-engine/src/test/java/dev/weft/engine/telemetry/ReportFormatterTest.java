@@ -52,4 +52,22 @@ class ReportFormatterTest {
         assertTrue(text.contains("Serial (global, no spatial home):     25.0%"));
         assertTrue(text.contains("Ticks analyzed: 10"));
     }
+
+    @Test
+    void activationLineAppearsOnlyWithThrottleableCost() {
+        String without = ReportFormatter.format(sampleReport(), 10);
+        assertFalse(without.contains("Projected WS-1"),
+                "no throttleable samples -> no projection line");
+
+        List<TickSample> samples = List.of(
+                new TickSample(TickSample.Source.ENTITY, "minecraft:cow",
+                        ChunkKey.pack(0, 0), 3_000_000, 4),
+                new TickSample(TickSample.Source.GLOBAL, "global:time",
+                        TickSample.NO_CHUNK, 1_000_000));
+        String with = ReportFormatter.format(
+                new RegionizabilityAnalyzer(2, new int[]{2}, 5).analyze(samples), 10);
+        // saved = 3ms * 3/4 = 2.25ms of 4ms total = 56.3%; throttleable = 75%
+        assertTrue(with.contains("Projected WS-1 activation savings: up to 56.3%"), with);
+        assertTrue(with.contains("75.0% of cost is mob AI"), with);
+    }
 }

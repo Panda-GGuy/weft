@@ -42,6 +42,19 @@ public final class ReportFormatter {
             sb.append(String.format("  %2d workers -> %.2fx\n", e.getKey(), e.getValue()));
         }
 
+        // WS-1 tie-in (RFC-0002): projection from per-sample activation
+        // intervals recorded at measurement time under the *configured* tiers,
+        // so the number is meaningful before the module is ever switched on.
+        if (r.throttleableNanos() > 0) {
+            sb.append(String.format(
+                    "Projected WS-1 activation savings: up to %.1f%% of attributed cost\n",
+                    pct(r.activationSavedNanos(), r.totalNanos())));
+            sb.append(String.format(
+                    "  (%.1f%% of cost is mob AI the configured tiers would throttle; upper\n"
+                    + "  bound - only the AI share of a throttled mob's tick is skipped)\n",
+                    pct(r.throttleableNanos(), r.totalNanos())));
+        }
+
         sb.append("Top cost sources:\n");
         List<RegionizabilityAnalyzer.TypeCost> types = new ArrayList<>(r.topTypes());
         for (RegionizabilityAnalyzer.TypeCost t : types) {

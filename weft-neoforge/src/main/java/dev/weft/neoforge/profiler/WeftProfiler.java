@@ -81,19 +81,24 @@ public final class WeftProfiler {
     }
 
     public void popEntity(String typeId, long chunkKey) {
-        pop(TickSample.Source.ENTITY, typeId, chunkKey);
+        pop(TickSample.Source.ENTITY, typeId, chunkKey, 1);
+    }
+
+    /** Entity variant carrying the WS-1 projected activation interval. */
+    public void popEntity(String typeId, long chunkKey, int aiInterval) {
+        pop(TickSample.Source.ENTITY, typeId, chunkKey, aiInterval);
     }
 
     public void popBlockEntity(String typeId, long chunkKey) {
-        pop(TickSample.Source.BLOCK_ENTITY, typeId, chunkKey);
+        pop(TickSample.Source.BLOCK_ENTITY, typeId, chunkKey, 1);
     }
 
     /** Work with no spatial home — serial under Weft (the Amdahl bucket). */
     public void popGlobal(String typeId) {
-        pop(TickSample.Source.GLOBAL, typeId, TickSample.NO_CHUNK);
+        pop(TickSample.Source.GLOBAL, typeId, TickSample.NO_CHUNK, 1);
     }
 
-    private void pop(TickSample.Source source, String typeId, long chunkKey) {
+    private void pop(TickSample.Source source, String typeId, long chunkKey, int aiInterval) {
         if (!WeftConfig.PROFILING_ENABLED || Thread.currentThread() != serverThread) {
             return;
         }
@@ -102,7 +107,7 @@ public final class WeftProfiler {
         Long start = nanoStack.poll();
         TickProfiler p = profiler;
         if (start != null && p != null) {
-            p.record(source, typeId, chunkKey, System.nanoTime() - start);
+            p.record(source, typeId, chunkKey, System.nanoTime() - start, aiInterval);
         }
     }
 

@@ -26,8 +26,18 @@ public abstract class ServerLevelMixin {
     @Inject(method = "tickNonPassenger", at = @At("RETURN"))
     private void weft$entityTickEnd(Entity entity, CallbackInfo ci) {
         var key = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType());
+        // WS-1 projection (RFC-0002): what interval would the configured
+        // activation tiers give this entity where it stands? Feeds the
+        // "projected WS-1 savings" report line; computed only when profiling
+        // is on (this hook is behind PROFILING_ENABLED inside the profiler,
+        // and the interval lookup is the expensive part we gate here).
+        int aiInterval = 1;
+        if (dev.weft.neoforge.WeftConfig.PROFILING_ENABLED
+                && entity instanceof net.minecraft.world.entity.Mob mob) {
+            aiInterval = dev.weft.neoforge.activation.ActivationHooks.projectedInterval(mob);
+        }
         WeftProfiler.get().popEntity(
                 key != null ? key.toString() : entity.getType().getClass().getName(),
-                entity.chunkPosition().toLong());
+                entity.chunkPosition().toLong(), aiInterval);
     }
 }

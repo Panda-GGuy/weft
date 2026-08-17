@@ -36,10 +36,18 @@ public final class RegionizabilityAnalyzer {
      * @param topTypes         most expensive sources, largest first
      * @param speedupByWorkers estimated tick speedup at k workers (LPT makespan
      *                         + serial fraction), keyed by worker count
+     * @param throttleableNanos entity cost carrying a WS-1 interval > 1 (the
+     *                          activation tiers would throttle it where it stood)
+     * @param activationSavedNanos projected WS-1 saving: each throttleable
+     *                          sample's cost scaled by its skipped-tick share,
+     *                          {@code nanos * (interval - 1) / interval} — an
+     *                          upper bound, since only the AI portion of an
+     *                          entity tick is actually skipped
      */
     public record Report(long totalNanos, long spatialNanos, long globalNanos,
                          List<RegionCost> regions, List<TypeCost> topTypes,
-                         Map<Integer, Double> speedupByWorkers) {}
+                         Map<Integer, Double> speedupByWorkers,
+                         long throttleableNanos, long activationSavedNanos) {}
 
     private final int mergeDistance;
     private final int[] workerCounts;
@@ -54,6 +62,8 @@ public final class RegionizabilityAnalyzer {
     public Report analyze(List<TickSample> samples) {
         long spatial = 0;
         long global = 0;
+        long throttleable = 0;
+        long activationSaved = 0;
 
         // Partition the sampled chunks exactly as the engine would.
         RegionManager rm = new RegionManager(mergeDistance, 0L);
@@ -65,6 +75,10 @@ public final class RegionizabilityAnalyzer {
             long[] agg = byType.get(s.typeId());
             agg[0] += s.nanos();
             agg[1]++;
+            if (s.aiInterval() > 1) {
+                throttleable += s.nanos();
+                activationSaved += s.nanos() * (s.aiInterval() - 1L) / s.aiInterval();
+            }
             if (s.spatial()) {
                 spatial += s.nanos();
                 costByChunk.merge(s.chunkKey(), s.nanos(), Long::sum);
@@ -105,7 +119,7 @@ public final class RegionizabilityAnalyzer {
         }
 
         return new Report(total, spatial, global, List.copyOf(regions), trimmedTypes,
-                Map.copyOf(speedups));
+                Map.copyOf(speedups), throttleable, activationSaved);
     }
 
     /** Makespan of scheduling region costs onto k workers, LPT heuristic. */
