@@ -55,6 +55,15 @@ overhead is negligible (~two `System.nanoTime()` calls per entity/BE tick).
 Profiling is toggleable at runtime with `/weft profile on|off`; tunables live
 in `config/weft-common.toml`.
 
+**P1 started — first off-thread service** (same day): the spawn-density scan
+runs as an `AsyncService` in **shadow mode** (vanilla stays authoritative;
+we compute the same state off-thread and diff against it every tick — see
+`/weft services` for live parity numbers). Stress-tested to 65k entities:
+zero service failures, all parity deltas explained by the by-design one-tick
+staleness, and vanilla's own scan cost is now itemized in `/weft report`
+(`natural_spawner/create_state`) as the measured prize for going
+authoritative later.
+
 ## Trying the P0 profiler locally
 
 1. Build the jar: \`./gradlew :weft-neoforge:build -PwithNeoForge\`
