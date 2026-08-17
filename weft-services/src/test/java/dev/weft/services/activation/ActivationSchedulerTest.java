@@ -6,6 +6,7 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -89,6 +90,25 @@ class ActivationSchedulerTest {
     void intervalOneAlwaysRuns() {
         assertTrue(ActivationScheduler.shouldRunThisTick(0, 0, 1));
         assertTrue(ActivationScheduler.shouldRunThisTick(999, 42, 0));
+    }
+
+    @Test
+    void repathDeferralStretchesVanillaWindowByInterval() {
+        // Vanilla window 20, interval 4 -> deferred through tick 80 inclusive.
+        assertTrue(ActivationScheduler.shouldDeferRepath(20, 20, 4),
+                "inside the vanilla window still defers");
+        assertTrue(ActivationScheduler.shouldDeferRepath(80, 20, 4),
+                "stretched boundary is inclusive, mirroring vanilla's > check");
+        assertFalse(ActivationScheduler.shouldDeferRepath(81, 20, 4),
+                "past the stretched window the recompute proceeds");
+    }
+
+    @Test
+    void repathDeferralNeverAppliesAtFullRate() {
+        // Interval 1 = full-rate ring / exempt / mid-fight: vanilla cadence
+        // is authoritative, even inside the vanilla window.
+        assertFalse(ActivationScheduler.shouldDeferRepath(0, 20, 1));
+        assertFalse(ActivationScheduler.shouldDeferRepath(19, 20, 1));
     }
 
     @Test

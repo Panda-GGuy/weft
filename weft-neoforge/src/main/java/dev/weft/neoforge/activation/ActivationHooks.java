@@ -35,10 +35,24 @@ public final class ActivationHooks {
 
     private static final LongAdder throttleDecisions = new LongAdder();
     private static final LongAdder throttleSkips = new LongAdder();
+    private static final LongAdder repathDeferrals = new LongAdder();
+
+    /**
+     * Vanilla {@code PathNavigation}'s own repath cadence guard
+     * (MAX_TIME_RECOMPUTE): recomputes within this many ticks of the last one
+     * are delayed. The widened window is this times the mob's AI interval.
+     */
+    private static final int VANILLA_REPATH_WINDOW_TICKS = 20;
 
     /** RFC-0003 R2 runtime applied-check for the fail-soft throttle mixin. */
     public static boolean hooksApplied() {
         return ActivationMarker.class.isAssignableFrom(Mob.class);
+    }
+
+    /** R2 applied-check for the repath-throttle half of WS-1 (fail-soft too). */
+    public static boolean repathHooksApplied() {
+        return RepathThrottleMarker.class.isAssignableFrom(
+                net.minecraft.world.entity.ai.navigation.PathNavigation.class);
     }
 
     /** Owned by the WeftModules coexistence resolution. */
@@ -110,15 +124,41 @@ public final class ActivationHooks {
         return run;
     }
 
+    /**
+     * WS-1 widening step 1 (RFC-0002): called from the
+     * {@code PathNavigation.recomputePath} HEAD hook on the server thread.
+     * True = defer this recompute (the mob keeps following its current path
+     * and vanilla's delayed-recomputation retry stays armed) because the
+     * mob's AI is throttled where it stands and the widened window —
+     * vanilla's 20-tick cadence times the AI interval — hasn't elapsed yet.
+     * Same activation module switch, same exemptions: inside the full-rate
+     * ring, mid-fight, or for exempt types {@link #projectedInterval} is 1
+     * and this never defers, so near-player repath cadence is untouched.
+     * Each deferral is also a createPath the WS-2 service never sees.
+     */
+    public static boolean shouldDeferRepath(Mob mob, long gameTime, long timeLastRecompute) {
+        if (!active) {
+            return false;
+        }
+        int interval = projectedInterval(mob);
+        if (!ActivationScheduler.shouldDeferRepath(
+                gameTime - timeLastRecompute, VANILLA_REPATH_WINDOW_TICKS, interval)) {
+            return false;
+        }
+        repathDeferrals.increment();
+        return true;
+    }
+
     /** Point-in-time view of the throttle counters (WS-8 benchmark deltas). */
-    public record Counters(long decisions, long skips) {
+    public record Counters(long decisions, long skips, long repathDeferrals) {
         public Counters minus(Counters earlier) {
-            return new Counters(decisions - earlier.decisions, skips - earlier.skips);
+            return new Counters(decisions - earlier.decisions, skips - earlier.skips,
+                    repathDeferrals - earlier.repathDeferrals);
         }
     }
 
     public static Counters counters() {
-        return new Counters(throttleDecisions.sum(), throttleSkips.sum());
+        return new Counters(throttleDecisions.sum(), throttleSkips.sum(), repathDeferrals.sum());
     }
 
     /** Extra detail for the posture report / {@code /weft status}. */
@@ -128,7 +168,7 @@ public final class ActivationHooks {
         if (decisions == 0) {
             return "no throttleable AI ticks yet";
         }
-        return String.format("skipped %d of %d throttleable AI ticks (%.0f%%)",
-                skips, decisions, 100.0 * skips / decisions);
+        return String.format("skipped %d of %d throttleable AI ticks (%.0f%%), deferred %d repaths",
+                skips, decisions, 100.0 * skips / decisions, repathDeferrals.sum());
     }
 }

@@ -98,4 +98,20 @@ public final class ActivationScheduler {
         }
         return Math.floorMod(gameTime + entityId, interval) == 0;
     }
+
+    /**
+     * WS-1 widening step 1 (RFC-0002): whether a throttled mob's periodic
+     * path recompute should be deferred. Vanilla recomputes at most once per
+     * {@code baseWindow} ticks (its own repath cadence guard); a mob whose AI
+     * ticks every {@code interval} ticks stretches that window to
+     * {@code baseWindow * interval}, so repath frequency scales down with AI
+     * frequency — and every deferred recompute is also a pathfinding request
+     * WS-2 never receives. Interval 1 (full-rate ring, exempt types,
+     * mid-fight) never defers: the caller falls through to the untouched
+     * vanilla check, so near-player behavior is bit-identical.
+     */
+    public static boolean shouldDeferRepath(long ticksSinceLastRecompute, int baseWindow,
+                                            int interval) {
+        return interval > 1 && ticksSinceLastRecompute <= (long) baseWindow * interval;
+    }
 }

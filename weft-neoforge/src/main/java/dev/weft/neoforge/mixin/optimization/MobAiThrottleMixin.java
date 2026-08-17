@@ -18,7 +18,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * mobs far from every player. Everything else in the method (noActionTime,
  * navigation, {@code customServerAiStep} i.e. brains and modded overrides,
  * move/look/jump controls) runs every tick, so in-flight movement never
- * freezes and despawn accounting is untouched.
+ * freezes and despawn accounting is untouched. The navigation step's
+ * periodic path <em>recompute</em> is the one exception: its cadence
+ * stretches with the same interval via {@link PathRecomputeThrottleMixin}.
  *
  * <p>All gated calls share one decision per {@code serverAiStep} invocation,
  * so a skipped tick skips them coherently (goals never observe a sensing

@@ -69,9 +69,12 @@ public final class WeftConfig {
 
     private static final ModConfigSpec.BooleanValue ACTIVATION_SCHEDULING_SPEC = BUILDER
             .comment("WS-1 (RFC-0002): tick distant mobs' expensive AI (sensing, goal and",
-                    "target selectors) at reduced frequency. Movement, physics, navigation",
-                    "and brain ticking stay per-tick. Independent kill switch (RFC-0003 R1);",
-                    "ships off until the WS-8 benchmarks prove the acceptance criteria.")
+                    "target selectors) at reduced frequency, and stretch their periodic",
+                    "path-recompute window by the same factor. Movement, physics, the",
+                    "per-tick navigation step and brain ticking stay per-tick; within",
+                    "activationFullRateDistance of a player nothing changes at all.",
+                    "Independent kill switch (RFC-0003 R1); ships off until the WS-8",
+                    "benchmarks prove the acceptance criteria.")
             .define("activationScheduling", false);
 
     private static final ModConfigSpec.IntValue ACTIVATION_FULL_RATE_DISTANCE_SPEC = BUILDER
