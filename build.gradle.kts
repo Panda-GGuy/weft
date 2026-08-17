@@ -26,6 +26,12 @@ subprojects {
         useJUnitPlatform()
     }
 
+    // Source files are UTF-8 regardless of platform default (javac on Windows
+    // otherwise assumes cp1252 and rejects/mangles non-ASCII).
+    tasks.withType<JavaCompile> {
+        options.encoding = "UTF-8"
+    }
+
     // RFC §3 dependency rule: engine and api must never touch Minecraft.
     if (name == "weft-engine" || name == "weft-api") {
         tasks.register("verifyNoMinecraftImports") {
