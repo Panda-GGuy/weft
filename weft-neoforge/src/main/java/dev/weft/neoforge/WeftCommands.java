@@ -28,6 +28,7 @@ public final class WeftCommands {
                         .requires(source -> source.hasPermission(2))
                         .executes(ctx -> usage(ctx.getSource()))
                         .then(Commands.literal("report").executes(ctx -> report(ctx.getSource())))
+                        .then(Commands.literal("services").executes(ctx -> services(ctx.getSource())))
                         .then(Commands.literal("profile")
                                 .executes(ctx -> profileStatus(ctx.getSource()))
                                 .then(Commands.literal("on").executes(ctx -> setProfiling(ctx.getSource(), true)))
@@ -36,7 +37,15 @@ public final class WeftCommands {
 
     private static int usage(CommandSourceStack source) {
         source.sendSuccess(() -> Component.literal(
-                "/weft report - regionizability report | /weft profile [on|off] - toggle profiling"), false);
+                "/weft report - regionizability report | /weft profile [on|off] - toggle profiling"
+                        + " | /weft services - P1 service status"), false);
+        return Command.SINGLE_SUCCESS;
+    }
+
+    private static int services(CommandSourceStack source) {
+        for (String line : WeftMod.serviceStatusLines()) {
+            source.sendSuccess(() -> Component.literal(line), false);
+        }
         return Command.SINGLE_SUCCESS;
     }
 

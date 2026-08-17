@@ -45,6 +45,13 @@ public final class WeftConfig {
             .comment("How many cost sources the report lists.")
             .defineInRange("reportTopTypes", 12, 1, 100);
 
+    private static final ModConfigSpec.BooleanValue SPAWN_SERVICE_SHADOW_SPEC = BUILDER
+            .comment("P1 shadow mode: recompute the spawn-density scan off-thread each tick",
+                    "and compare against vanilla (which stays authoritative). Costs a few",
+                    "microseconds of capture per level tick; produces parity data via",
+                    "/weft services.")
+            .define("spawnServiceShadow", true);
+
     private static final ModConfigSpec.ConfigValue<List<? extends Integer>> SPEEDUP_WORKER_COUNTS_SPEC = BUILDER
             .comment("Worker counts to estimate hypothetical speedup for.")
             .defineListAllowEmpty("speedupWorkerCounts", List.of(2, 4, 8, 16),
@@ -60,6 +67,7 @@ public final class WeftConfig {
     public static volatile int PROFILE_WINDOW_TICKS = 100;
     public static volatile int REPORT_LOG_INTERVAL_TICKS = 1200;
     public static volatile int REPORT_TOP_TYPES = 12;
+    public static volatile boolean SPAWN_SERVICE_SHADOW = true;
     public static volatile int[] SPEEDUP_WORKER_COUNTS = {2, 4, 8, 16};
 
     /** Wired to the mod event bus in {@link WeftMod}. */
@@ -73,6 +81,7 @@ public final class WeftConfig {
         PROFILE_WINDOW_TICKS = PROFILE_WINDOW_TICKS_SPEC.get();
         REPORT_LOG_INTERVAL_TICKS = REPORT_LOG_INTERVAL_TICKS_SPEC.get();
         REPORT_TOP_TYPES = REPORT_TOP_TYPES_SPEC.get();
+        SPAWN_SERVICE_SHADOW = SPAWN_SERVICE_SHADOW_SPEC.get();
         SPEEDUP_WORKER_COUNTS = SPEEDUP_WORKER_COUNTS_SPEC.get().stream()
                 .mapToInt(Integer::intValue).toArray();
     }

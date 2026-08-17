@@ -5,6 +5,7 @@ import dev.weft.engine.graph.GraphScheduler;
 import dev.weft.engine.region.RegionManager;
 import dev.weft.engine.sched.WeftScheduler;
 import dev.weft.neoforge.profiler.WeftProfiler;
+import dev.weft.neoforge.service.WeftServices;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.common.Mod;
@@ -28,6 +29,7 @@ public final class WeftMod {
 
     private static WeftScheduler scheduler;
     private static RegionManager regions;
+    private static WeftServices services;
 
     private static final Logger LOGGER = LogUtils.getLogger();
 
@@ -38,10 +40,22 @@ public final class WeftMod {
         NeoForge.EVENT_BUS.addListener(this::onServerAboutToStart);
         NeoForge.EVENT_BUS.addListener(this::onServerStopping);
         NeoForge.EVENT_BUS.addListener((RegisterCommandsEvent e) -> WeftCommands.register(e));
+        NeoForge.EVENT_BUS.addListener((net.neoforged.neoforge.event.tick.LevelTickEvent.Post e) -> {
+            if (services != null) {
+                services.onLevelTickPost(e);
+            }
+        });
+    }
+
+    /** P1 service status for {@code /weft services}; empty before server start. */
+    public static java.util.List<String> serviceStatusLines() {
+        WeftServices s = services;
+        return s == null ? java.util.List.of("Server not running.") : s.statusLines();
     }
 
     private void onServerAboutToStart(ServerAboutToStartEvent event) {
         long seed = event.getServer().getWorldData().worldGenOptions().seed();
+        services = new WeftServices();
         regions = new RegionManager(WeftConfig.MERGE_DISTANCE, seed);
         GraphScheduler graphs = new GraphScheduler((graph, tick) -> WeftSnapshots.EMPTY);
         scheduler = new WeftScheduler(
@@ -53,6 +67,10 @@ public final class WeftMod {
         if (scheduler != null) {
             scheduler.close();
             scheduler = null;
+        }
+        if (services != null) {
+            services.close();
+            services = null;
         }
     }
 

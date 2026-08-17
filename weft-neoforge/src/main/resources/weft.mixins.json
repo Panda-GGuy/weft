@@ -6,7 +6,8 @@
   "mixins": [
     "MinecraftServerMixin",
     "ServerLevelMixin",
-    "BoundTickingBlockEntityMixin"
+    "BoundTickingBlockEntityMixin",
+    "NaturalSpawnerMixin"
   ],
   "injectors": {
     "defaultRequire": 1
