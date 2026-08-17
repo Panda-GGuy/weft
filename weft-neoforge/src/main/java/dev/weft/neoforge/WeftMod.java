@@ -62,10 +62,14 @@ public final class WeftMod {
         profiler.onTickStart();
 
         // Periodic P0 summary so headless/dedicated runs get data without /weft.
+        // Built off-thread: buildReport() is thread-safe by design and costs
+        // ~50ms on a very busy pack's window (measured by EngineBenchmark) —
+        // that would be a full skipped tick if done here.
         if (WeftConfig.PROFILING_ENABLED
                 && WeftConfig.REPORT_LOG_INTERVAL_TICKS > 0
                 && profiler.tickCounter() % WeftConfig.REPORT_LOG_INTERVAL_TICKS == 0) {
-            LOGGER.info("\n{}", profiler.buildReport());
+            java.util.concurrent.CompletableFuture.runAsync(
+                    () -> LOGGER.info("\n{}", profiler.buildReport()));
         }
 
         if (scheduler == null) {
