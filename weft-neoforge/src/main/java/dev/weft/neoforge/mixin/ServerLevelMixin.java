@@ -25,8 +25,9 @@ public abstract class ServerLevelMixin {
 
     @Inject(method = "tickNonPassenger", at = @At("RETURN"))
     private void weft$entityTickEnd(Entity entity, CallbackInfo ci) {
+        var key = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType());
         WeftProfiler.get().popEntity(
-                BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString(),
+                key != null ? key.toString() : entity.getType().getClass().getName(),
                 entity.chunkPosition().toLong());
     }
 }

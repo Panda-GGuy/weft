@@ -1,26 +1,79 @@
 package dev.weft.neoforge;
 
-/** Placeholder until this moves to NeoForge's config system. RFC §4.2 tunables. */
+import net.neoforged.fml.event.config.ModConfigEvent;
+import net.neoforged.neoforge.common.ModConfigSpec;
+
+import java.util.List;
+
+/**
+ * Weft tunables (RFC §4.2), backed by NeoForge's config system
+ * ({@code config/weft-common.toml}).
+ *
+ * <p>Values are cached into plain static fields on {@link ModConfigEvent}
+ * so hot paths (profiler hooks, per-tick reads) never touch the config
+ * machinery, and reads before the config loads fall back to the defaults
+ * instead of throwing.
+ */
 public final class WeftConfig {
     private WeftConfig() {}
 
-    /** Chebyshev chunk distance within which regions merge. Validate via P0 data. */
-    public static final int MERGE_DISTANCE = 8;
+    private static final ModConfigSpec.Builder BUILDER = new ModConfigSpec.Builder();
 
-    /** Threads reserved for IO / netty / GC breathing room. */
-    public static final int RESERVED_THREADS = 2;
+    private static final ModConfigSpec.IntValue MERGE_DISTANCE_SPEC = BUILDER
+            .comment("Chebyshev chunk distance within which regions merge.",
+                    "Also used by the P0 report's hypothetical-region partition. RFC-0001 sec. 4.2.")
+            .defineInRange("mergeDistance", 8, 1, 64);
 
-    // --- P0 profiler (RFC §9.1) ---
+    private static final ModConfigSpec.IntValue RESERVED_THREADS_SPEC = BUILDER
+            .comment("Threads reserved for IO / netty / GC breathing room.")
+            .defineInRange("reservedThreads", 2, 0, 32);
 
-    /** Rolling window of completed ticks the report is computed over. */
-    public static final int PROFILE_WINDOW_TICKS = 100;
+    private static final ModConfigSpec.BooleanValue PROFILING_ENABLED_SPEC = BUILDER
+            .comment("Whether the P0 tick profiler records samples.",
+                    "Toggle at runtime with /weft profile on|off (not persisted).")
+            .define("profilingEnabled", true);
 
-    /** Log a report summary to console every N ticks (1200 = 60s). 0 = off. */
-    public static final int REPORT_LOG_INTERVAL_TICKS = 1200;
+    private static final ModConfigSpec.IntValue PROFILE_WINDOW_TICKS_SPEC = BUILDER
+            .comment("Rolling window of completed ticks the report is computed over.")
+            .defineInRange("profileWindowTicks", 100, 1, 20 * 600);
 
-    /** Worker counts to estimate hypothetical speedup for. */
-    public static final int[] SPEEDUP_WORKER_COUNTS = {2, 4, 8, 16};
+    private static final ModConfigSpec.IntValue REPORT_LOG_INTERVAL_TICKS_SPEC = BUILDER
+            .comment("Log a report summary to console every N ticks (1200 = 60s). 0 = off.")
+            .defineInRange("reportLogIntervalTicks", 1200, 0, Integer.MAX_VALUE);
 
-    /** How many cost sources the report lists. */
-    public static final int REPORT_TOP_TYPES = 12;
+    private static final ModConfigSpec.IntValue REPORT_TOP_TYPES_SPEC = BUILDER
+            .comment("How many cost sources the report lists.")
+            .defineInRange("reportTopTypes", 12, 1, 100);
+
+    private static final ModConfigSpec.ConfigValue<List<? extends Integer>> SPEEDUP_WORKER_COUNTS_SPEC = BUILDER
+            .comment("Worker counts to estimate hypothetical speedup for.")
+            .defineListAllowEmpty("speedupWorkerCounts", List.of(2, 4, 8, 16),
+                    () -> 4, o -> o instanceof Integer i && i >= 1 && i <= 1024);
+
+    public static final ModConfigSpec SPEC = BUILDER.build();
+
+    // --- cached values (defaults mirror the spec; refreshed on config events) ---
+
+    public static volatile int MERGE_DISTANCE = 8;
+    public static volatile int RESERVED_THREADS = 2;
+    public static volatile boolean PROFILING_ENABLED = true;
+    public static volatile int PROFILE_WINDOW_TICKS = 100;
+    public static volatile int REPORT_LOG_INTERVAL_TICKS = 1200;
+    public static volatile int REPORT_TOP_TYPES = 12;
+    public static volatile int[] SPEEDUP_WORKER_COUNTS = {2, 4, 8, 16};
+
+    /** Wired to the mod event bus in {@link WeftMod}. */
+    static void onConfigEvent(ModConfigEvent event) {
+        if (event.getConfig().getSpec() != SPEC) {
+            return;
+        }
+        MERGE_DISTANCE = MERGE_DISTANCE_SPEC.get();
+        RESERVED_THREADS = RESERVED_THREADS_SPEC.get();
+        PROFILING_ENABLED = PROFILING_ENABLED_SPEC.get();
+        PROFILE_WINDOW_TICKS = PROFILE_WINDOW_TICKS_SPEC.get();
+        REPORT_LOG_INTERVAL_TICKS = REPORT_LOG_INTERVAL_TICKS_SPEC.get();
+        REPORT_TOP_TYPES = REPORT_TOP_TYPES_SPEC.get();
+        SPEEDUP_WORKER_COUNTS = SPEEDUP_WORKER_COUNTS_SPEC.get().stream()
+                .mapToInt(Integer::intValue).toArray();
+    }
 }

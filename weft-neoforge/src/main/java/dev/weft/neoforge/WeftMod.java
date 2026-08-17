@@ -6,7 +6,10 @@ import dev.weft.engine.region.RegionManager;
 import dev.weft.engine.sched.WeftScheduler;
 import dev.weft.neoforge.profiler.WeftProfiler;
 import net.neoforged.bus.api.IEventBus;
+import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.common.Mod;
+import net.neoforged.fml.config.ModConfig;
+import net.neoforged.fml.event.config.ModConfigEvent;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.neoforged.neoforge.event.server.ServerAboutToStartEvent;
@@ -28,7 +31,10 @@ public final class WeftMod {
 
     private static final Logger LOGGER = LogUtils.getLogger();
 
-    public WeftMod(IEventBus modBus) {
+    public WeftMod(IEventBus modBus, ModContainer container) {
+        container.registerConfig(ModConfig.Type.COMMON, WeftConfig.SPEC);
+        modBus.addListener((ModConfigEvent.Loading e) -> WeftConfig.onConfigEvent(e));
+        modBus.addListener((ModConfigEvent.Reloading e) -> WeftConfig.onConfigEvent(e));
         NeoForge.EVENT_BUS.addListener(this::onServerAboutToStart);
         NeoForge.EVENT_BUS.addListener(this::onServerStopping);
         NeoForge.EVENT_BUS.addListener((RegisterCommandsEvent e) -> WeftCommands.register(e));
@@ -56,7 +62,8 @@ public final class WeftMod {
         profiler.onTickStart();
 
         // Periodic P0 summary so headless/dedicated runs get data without /weft.
-        if (WeftConfig.REPORT_LOG_INTERVAL_TICKS > 0
+        if (WeftConfig.PROFILING_ENABLED
+                && WeftConfig.REPORT_LOG_INTERVAL_TICKS > 0
                 && profiler.tickCounter() % WeftConfig.REPORT_LOG_INTERVAL_TICKS == 0) {
             LOGGER.info("\n{}", profiler.buildReport());
         }

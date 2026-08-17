@@ -14,6 +14,9 @@ import java.nio.file.Path;
  * {@code /weft report} — print the P0 regionizability report to whoever asked
  * (chat in single player, console on a dedicated server) and write
  * {@code weft-report.txt} into the game directory.
+ *
+ * <p>{@code /weft profile on|off} — toggle profiling at runtime (not
+ * persisted; the config default applies on next launch).
  */
 public final class WeftCommands {
 
@@ -23,7 +26,18 @@ public final class WeftCommands {
         event.getDispatcher().register(
                 Commands.literal("weft")
                         .requires(source -> source.hasPermission(2))
-                        .then(Commands.literal("report").executes(ctx -> report(ctx.getSource()))));
+                        .executes(ctx -> usage(ctx.getSource()))
+                        .then(Commands.literal("report").executes(ctx -> report(ctx.getSource())))
+                        .then(Commands.literal("profile")
+                                .executes(ctx -> profileStatus(ctx.getSource()))
+                                .then(Commands.literal("on").executes(ctx -> setProfiling(ctx.getSource(), true)))
+                                .then(Commands.literal("off").executes(ctx -> setProfiling(ctx.getSource(), false)))));
+    }
+
+    private static int usage(CommandSourceStack source) {
+        source.sendSuccess(() -> Component.literal(
+                "/weft report - regionizability report | /weft profile [on|off] - toggle profiling"), false);
+        return Command.SINGLE_SUCCESS;
     }
 
     private static int report(CommandSourceStack source) {
@@ -38,6 +52,20 @@ public final class WeftCommands {
         } catch (IOException e) {
             source.sendFailure(Component.literal("Could not write weft-report.txt: " + e.getMessage()));
         }
+        return Command.SINGLE_SUCCESS;
+    }
+
+    private static int profileStatus(CommandSourceStack source) {
+        source.sendSuccess(() -> Component.literal(
+                "Weft profiling is " + (WeftConfig.PROFILING_ENABLED ? "ON" : "OFF")), false);
+        return Command.SINGLE_SUCCESS;
+    }
+
+    private static int setProfiling(CommandSourceStack source, boolean enabled) {
+        WeftConfig.PROFILING_ENABLED = enabled;
+        source.sendSuccess(() -> Component.literal(
+                "Weft profiling " + (enabled ? "ON" : "OFF")
+                        + " (runtime only - config default applies on next launch)"), true);
         return Command.SINGLE_SUCCESS;
     }
 }

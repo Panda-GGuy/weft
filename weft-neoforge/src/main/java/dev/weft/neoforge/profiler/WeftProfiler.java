@@ -18,12 +18,21 @@ import java.util.List;
  * report answers "how much of this pack's tick would Weft parallelize."
  * Runs on stock servers and the single-player integrated server alike —
  * everything records on the server thread.
+ *
+ * <p>Hardening notes: the timing stack is cleared at every tick boundary so
+ * an exception between a HEAD and RETURN hook (entity crash caught by the
+ * loader, chunk unload mid-tick) can only skew attribution within that one
+ * tick, never leak permanently. All hooks early-out when profiling is
+ * toggled off ({@code /weft profile off}), leaving two static reads per
+ * hook as the disabled-mode cost.
  */
 public final class WeftProfiler {
 
     private static final WeftProfiler INSTANCE = new WeftProfiler();
 
-    private final TickProfiler profiler = new TickProfiler(WeftConfig.PROFILE_WINDOW_TICKS);
+    /** Recreated when the configured window size changes; volatile because
+     *  report generation may happen from a command/console thread. */
+    private volatile TickProfiler profiler;
     private final ArrayDeque<Long> nanoStack = new ArrayDeque<>();
     private long tickCounter;
 
@@ -36,12 +45,26 @@ public final class WeftProfiler {
     /** Called from MinecraftServerMixin at the top of every server tick. */
     public void onTickStart() {
         tickCounter++;
-        profiler.tickBoundary(tickCounter, System.nanoTime());
+        // Leak protection: any start times stranded by an exception path
+        // between HEAD and RETURN hooks die with the tick they belong to.
+        nanoStack.clear();
+        if (!WeftConfig.PROFILING_ENABLED) {
+            return;
+        }
+        TickProfiler p = profiler;
+        if (p == null || p.windowSize() != WeftConfig.PROFILE_WINDOW_TICKS) {
+            p = new TickProfiler(WeftConfig.PROFILE_WINDOW_TICKS);
+            profiler = p;
+        }
+        p.tickBoundary(tickCounter, System.nanoTime());
     }
 
     // --- timing hooks (server thread only; stack handles nesting) ---
 
     public void push() {
+        if (!WeftConfig.PROFILING_ENABLED) {
+            return;
+        }
         nanoStack.push(System.nanoTime());
     }
 
@@ -54,9 +77,15 @@ public final class WeftProfiler {
     }
 
     private void pop(TickSample.Source source, String typeId, long chunkKey) {
+        if (!WeftConfig.PROFILING_ENABLED) {
+            return;
+        }
+        // poll() is null on empty: tolerates a toggle-on between HEAD and
+        // RETURN of the same tickable (push skipped, pop not).
         Long start = nanoStack.poll();
-        if (start != null) {
-            profiler.record(source, typeId, chunkKey, System.nanoTime() - start);
+        TickProfiler p = profiler;
+        if (start != null && p != null) {
+            p.record(source, typeId, chunkKey, System.nanoTime() - start);
         }
     }
 
@@ -64,9 +93,14 @@ public final class WeftProfiler {
 
     /** Build the report over the current window. Safe from any thread. */
     public String buildReport() {
-        List<TickProfiler.TickRecord> window = profiler.snapshotWindow();
+        TickProfiler p = profiler;
+        List<TickProfiler.TickRecord> window = p == null ? List.of() : p.snapshotWindow();
+        String prefix = WeftConfig.PROFILING_ENABLED
+                ? "" : "(profiling is OFF - data below is stale; /weft profile on)\n";
         if (window.isEmpty()) {
-            return "Weft: no completed ticks in the window yet — let the server run a few seconds.";
+            return WeftConfig.PROFILING_ENABLED
+                    ? "Weft: no completed ticks in the window yet - let the server run a few seconds."
+                    : "Weft: profiling is OFF and no data was recorded. /weft profile on";
         }
         List<TickSample> all = new ArrayList<>();
         for (TickProfiler.TickRecord rec : window) {
@@ -75,7 +109,7 @@ public final class WeftProfiler {
         RegionizabilityAnalyzer analyzer = new RegionizabilityAnalyzer(
                 WeftConfig.MERGE_DISTANCE, WeftConfig.SPEEDUP_WORKER_COUNTS, WeftConfig.REPORT_TOP_TYPES);
         RegionizabilityAnalyzer.Report report = analyzer.analyze(all);
-        return ReportFormatter.format(report, window.size());
+        return prefix + ReportFormatter.format(report, window.size());
     }
 
     /** Write the report next to the server/world files; returns the path. */
