@@ -81,6 +81,17 @@ public final class RegionManager {
         return home;
     }
 
+    /**
+     * Reserve a region id without creating a region: the owner identity for
+     * P2 increment 1's whole-world serial region, which deliberately never
+     * enters the chunk→region mapping (owner routing stays on the global
+     * inbox until a later increment assigns real chunks). Reserving from the
+     * same counter keeps owner ids unique across both uses.
+     */
+    public long reserveRegionId() {
+        return nextRegionId.getAndIncrement();
+    }
+
     /** Unload a chunk. Caller should run {@link #recomputeSplits()} afterwards. */
     public void removeChunk(int chunkX, int chunkZ) {
         long key = ChunkKey.pack(chunkX, chunkZ);

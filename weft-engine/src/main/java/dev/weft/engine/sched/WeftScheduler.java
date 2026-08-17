@@ -19,6 +19,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.LongAdder;
 
 /**
  * The phased tick pipeline (RFC-0001 §4.3). One call to {@link #tick} is one
@@ -87,6 +88,39 @@ public final class WeftScheduler implements AutoCloseable {
     /** Largest shard fan-out any region used last tick (R5 status line). */
     public int lastMaxShards() {
         return lastMaxShards;
+    }
+
+    // P2 increment 1 (RFC-0001 §11): vanilla tick sections run *through* the
+    // engine — same thread, same order — so the ownership seam exists before
+    // any semantics change. Counted for engagement checks (WS-8 vacuous-run
+    // guards) and the R5 status line.
+    private final LongAdder ownedSerialSections = new LongAdder();
+
+    /**
+     * Run one vanilla tick section under engine ownership: serially, on the
+     * calling thread, in vanilla's own iteration order. This is deliberately
+     * the degenerate case of the REGION phase — bit-identical to vanilla by
+     * construction — establishing the thread-context/guard seam that later
+     * P2 increments move into the parallel REGION phase proper.
+     *
+     * <p>The section runs under a {@link ThreadContext.Kind#REGION} context
+     * for {@code regionOwnerId}, so guard-instrumented mutation paths see a
+     * real owner instead of {@code NONE}. The context is restored (and the
+     * section counted) even when the section throws.
+     */
+    public void runOwnedSerial(long regionOwnerId, Runnable section) {
+        ThreadContext.enter(ThreadContext.Kind.REGION, regionOwnerId);
+        try {
+            section.run();
+        } finally {
+            ThreadContext.exit();
+            ownedSerialSections.increment();
+        }
+    }
+
+    /** Sections run through {@link #runOwnedSerial} since boot. */
+    public long ownedSerialSections() {
+        return ownedSerialSections.sum();
     }
 
     /** Entry point for cross-thread submissions (network threads, console). */

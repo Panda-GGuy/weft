@@ -3,6 +3,7 @@ package dev.weft.neoforge.coexist;
 import com.mojang.logging.LogUtils;
 import dev.weft.neoforge.WeftConfig;
 import dev.weft.neoforge.activation.ActivationHooks;
+import dev.weft.neoforge.regiontick.RegionizedTicking;
 import dev.weft.neoforge.service.SpawnDensityHooks;
 import dev.weft.neoforge.service.SpawnDensityMode;
 import dev.weft.sandbox.coexist.CoexistencePolicy;
@@ -79,12 +80,20 @@ public final class WeftModules {
             new Def("entity_sharding", "WS-10 intra-region entity sharding",
                     () -> WeftConfig.ENTITY_SHARDING,
                     // Engine-internal today (regions carry no real entities
-                    // until P2's tick-ownership mixins); once those land,
-                    // this becomes their R2 applied-check and a failure
-                    // floors the shard count to 1 (RFC-0004 §3).
+                    // until later P2 increments hand tickables to the REGION
+                    // phase); once those land, this becomes the tick-ownership
+                    // mixins' R2 applied-check and a failure floors the shard
+                    // count to 1 (RFC-0004 §3).
                     () -> true,
                     dev.weft.neoforge.WeftMod::applyEntitySharding,
-                    dev.weft.neoforge.WeftMod::entityShardingDetail));
+                    dev.weft.neoforge.WeftMod::entityShardingDetail),
+            new Def("regionized_ticking", "P2 regionized vanilla ticking",
+                    () -> WeftConfig.REGIONIZED_TICKING,
+                    // The ownership mixins are fail-loud (weft.mixins.json,
+                    // R2's reserved case), so this is belt-and-braces.
+                    RegionizedTicking::hooksApplied,
+                    RegionizedTicking::setActive,
+                    RegionizedTicking::statusDetail));
 
     private static volatile NeighborRegistry registry;
     private static volatile boolean resolvedOnce;

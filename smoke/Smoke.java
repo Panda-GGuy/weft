@@ -110,6 +110,22 @@ public final class Smoke {
             check(ranOnOwner.get() == 0, "runOnOwner task deferred until owner's mail phase");
             sched.tick();
             check(ranOnOwner.get() == 1, "runOnOwner task delivered during mail phase");
+
+            // --- P2 increment 1: owned serial sections (RFC-0001 §11) ---
+            long ownerId = rm3.reserveRegionId();
+            Thread caller = Thread.currentThread();
+            boolean[] ownedOk = new boolean[1];
+            sched.runOwnedSerial(ownerId, () -> {
+                var ctx = dev.weft.engine.guard.ThreadContext.current();
+                ownedOk[0] = Thread.currentThread() == caller
+                        && ctx.kind() == dev.weft.engine.guard.ThreadContext.Kind.REGION
+                        && ctx.ownerId() == ownerId;
+            });
+            check(ownedOk[0], "owned serial section runs on caller thread under REGION context");
+            check(dev.weft.engine.guard.ThreadContext.current().kind()
+                    == dev.weft.engine.guard.ThreadContext.Kind.NONE,
+                    "thread context restored after owned serial section");
+            check(sched.ownedSerialSections() == 1, "owned serial sections counted");
         }
         List<String> seq = new ArrayList<>(order);
         check(seq.stream().filter("REGION"::equals).count() == 8, "all 8 regions ticked");

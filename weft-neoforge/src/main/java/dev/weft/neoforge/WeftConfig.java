@@ -149,6 +149,18 @@ public final class WeftConfig {
             .comment("Minimum tickables per shard; regions below this stay serial.")
             .defineInRange("entityShardMinBatch", 64, 1, 100_000);
 
+    // --- P2: regionized vanilla ticking (RFC-0001 sec. 11; kill switch per RFC-0003 R1) ---
+
+    private static final ModConfigSpec.BooleanValue REGIONIZED_TICKING_SPEC = BUILDER
+            .comment("P2 (RFC-0001 sec. 11): route vanilla entity and block-entity ticking",
+                    "through the Weft engine. Increment 1 is deliberately the degenerate",
+                    "case - every level's loaded chunks as ONE region, ticked serially on",
+                    "the server thread in vanilla's own order (bit-identical by",
+                    "construction: it exercises the ownership seams and the vanilla-parity",
+                    "suite, not parallelism yet). Ships off until the parity suite",
+                    "(RFC-0005) is green for every increment that changes semantics.")
+            .define("regionizedTicking", false);
+
     // --- RFC-0003 R4: user overrides of the coexistence ladder, both directions ---
 
     private static final ModConfigSpec.ConfigValue<List<? extends String>> FORCE_ENABLE_MODULES_SPEC = BUILDER
@@ -189,6 +201,7 @@ public final class WeftConfig {
     public static volatile int PATHFINDING_THREADS = 2;
     public static volatile boolean ENTITY_SHARDING = false;
     public static volatile int ENTITY_SHARD_MIN_BATCH = 64;
+    public static volatile boolean REGIONIZED_TICKING = false;
     public static volatile Set<String> FORCE_ENABLE_MODULES = Set.of();
     public static volatile Set<String> FORCE_DISABLE_MODULES = Set.of();
 
@@ -240,6 +253,7 @@ public final class WeftConfig {
         PATHFINDING_THREADS = PATHFINDING_THREADS_SPEC.get();
         ENTITY_SHARDING = ENTITY_SHARDING_SPEC.get();
         ENTITY_SHARD_MIN_BATCH = ENTITY_SHARD_MIN_BATCH_SPEC.get();
+        REGIONIZED_TICKING = REGIONIZED_TICKING_SPEC.get();
         FORCE_ENABLE_MODULES = Set.copyOf(FORCE_ENABLE_MODULES_SPEC.get());
         FORCE_DISABLE_MODULES = Set.copyOf(FORCE_DISABLE_MODULES_SPEC.get());
     }

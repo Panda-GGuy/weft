@@ -5,6 +5,7 @@ import dev.weft.api.graph.GraphDefinition;
 import dev.weft.api.graph.GraphTicker;
 import dev.weft.api.graph.WorldSnapshot;
 import dev.weft.engine.graph.GraphScheduler;
+import dev.weft.engine.guard.ThreadContext;
 import dev.weft.engine.guard.WeftGuards;
 import dev.weft.engine.region.Region;
 import dev.weft.engine.region.RegionManager;
@@ -142,6 +143,37 @@ class WeftSchedulerTest {
             assertEquals(0, ran.get(), "task must not run before its owner's mail phase");
             sched.tick();
             assertEquals(1, ran.get(), "task runs during owner's mail drain");
+        }
+    }
+
+    @Test
+    void runOwnedSerialEstablishesRegionContextOnCallingThread() throws Exception {
+        WeftGuards.setMode(WeftGuards.Mode.DEV);
+        RegionManager rm = new RegionManager(1, 7L);
+        long ownerId = rm.reserveRegionId();
+
+        GraphScheduler gs = new GraphScheduler((g, t) -> EMPTY_SNAPSHOT);
+        try (WeftScheduler sched = new WeftScheduler(2, rm, gs, new WeftScheduler.Hooks() {})) {
+            assertEquals(0, sched.ownedSerialSections());
+            Thread caller = Thread.currentThread();
+            sched.runOwnedSerial(ownerId, () -> {
+                assertSame(caller, Thread.currentThread(),
+                        "increment 1 is serial: the section runs on the calling thread");
+                assertEquals(ThreadContext.Kind.REGION, ThreadContext.current().kind());
+                assertEquals(ownerId, ThreadContext.current().ownerId());
+                WeftGuards.checkRegionMutation(ownerId); // we are the owner: must not trip
+            });
+            assertEquals(ThreadContext.Kind.NONE, ThreadContext.current().kind(),
+                    "context restored after the owned section");
+            assertEquals(1, sched.ownedSerialSections());
+
+            // A throwing section must still restore the context and be counted.
+            assertThrows(IllegalStateException.class,
+                    () -> sched.runOwnedSerial(ownerId, () -> {
+                        throw new IllegalStateException("boom");
+                    }));
+            assertEquals(ThreadContext.Kind.NONE, ThreadContext.current().kind());
+            assertEquals(2, sched.ownedSerialSections());
         }
     }
 
