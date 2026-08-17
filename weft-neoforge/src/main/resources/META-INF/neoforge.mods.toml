@@ -1,0 +1,33 @@
+modLoader = "javafml"
+loaderVersion = "[4,)"
+license = "LGPL-3.0"
+issueTrackerURL = "https://github.com/REPLACE_OWNER/weft/issues"
+
+[[mods]]
+modId = "weft"
+version = "0.1.0-alpha"
+displayName = "Weft"
+description = '''
+Multithreaded server engine for modded Minecraft.
+Regionized world ticking + a graph scheduler for cross-chunk mod networks,
+with a compatibility sandbox that runs unverified mods with exact
+single-threaded semantics. See RFC-0001 in the repo.
+'''
+authors = "Panda-GGuy"
+
+[[dependencies.weft]]
+modId = "neoforge"
+type = "required"
+versionRange = "[21.1,)"
+ordering = "NONE"
+side = "SERVER"
+
+[[dependencies.weft]]
+modId = "minecraft"
+type = "required"
+versionRange = "[1.21.1,1.22)"
+ordering = "NONE"
+side = "SERVER"
+
+[[mixins]]
+config = "weft.mixins.json"
