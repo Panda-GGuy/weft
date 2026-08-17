@@ -105,12 +105,11 @@ public final class RegionizedTicking {
     public static String statusDetail() {
         long e = entitySections.sum();
         long b = blockEntitySections.sum();
-        if (e == 0 && b == 0) {
-            return "increment 1: one region per level, serial, server thread; no sections owned yet";
-        }
-        return String.format(
-                "increment 1: one region per level, serial, server thread; %d entity + %d block-entity sections owned",
-                e, b);
+        String sections = e == 0 && b == 0
+                ? "no sections owned yet"
+                : String.format("%d entity + %d block-entity sections owned", e, b);
+        return "increment 1 ticking (whole level, serial, server thread): " + sections
+                + "; " + RegionTopology.summary();
     }
 
     private static long ownerId(ServerLevel level) {

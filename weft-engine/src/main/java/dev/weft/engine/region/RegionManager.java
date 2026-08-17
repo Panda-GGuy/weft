@@ -145,6 +145,11 @@ public final class RegionManager {
         return regions;
     }
 
+    /** Loaded chunks currently mapped to a region. */
+    public int chunkCount() {
+        return chunkToRegion.size();
+    }
+
     private void absorb(Region into, Region victim) {
         for (long key : victim.chunks()) {
             chunkToRegion.put(key, into);

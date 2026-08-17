@@ -142,10 +142,25 @@ syntax-checked 2026-08-17 with first scheduled executions pending, so treat
 them as unproven until they have a green run — plus a coexistence-policy fix
 the R7 work surfaced: **force-enable can no longer out-rank a REFUSE** — R4
 licenses overriding a yield, never an ownership conflict (unit-gated in
-`CoexistencePolicyTest`). Next increments (region
-assignment from real chunk positions, the legacy lane, parallel regions,
-WS-10 activation) each stay off until the parity suite is green at their
-declared equivalence class (RFC-0005 §4).
+`CoexistencePolicyTest`). Next increments (the legacy lane,
+parallel regions, WS-10 activation) each stay off until the parity suite is
+green at their declared equivalence class (RFC-0005 §4).
+
+**P2 increment 2 — the real chunk→region mapping** (2026-08-17, same day):
+`RegionTopology` now maintains one `RegionManager` per level, fed by actual
+chunk load/unload events — merge-on-load, splits recomputed between ticks
+(throttled, only after removals) — with the RFC-0001 §4.2 invariants gated
+by a new hard gametest (`p2regions`): far-apart forced islands resolve to
+distinct regions, every loaded chunk maps to exactly one region, and
+loading a chain of chunks between islands merges them into one. Surfaced
+in `/weft status` (live region/chunk counts next to the profiler's
+*hypothetical* partition). Honest scoping: this is always-on
+**bookkeeping** — the scheduler's own region set stays empty and owner
+routing still resolves to the global inbox, because region-mailbox
+delivery runs on workers and is only safe once region workers own the
+state a message touches; that rewiring belongs to the parallel-regions
+increment (E1), not this one. Cost of the feed is a map update per chunk
+load/unload; the nightly `loadgen_fresh_chunk_load` trend line guards it.
 
 **RFC-0002/0003 workstreams started** (2026-08-16): every Weft optimization
 module now walks the [RFC-0003](docs/RFC-0003-coexistence-policy.md)

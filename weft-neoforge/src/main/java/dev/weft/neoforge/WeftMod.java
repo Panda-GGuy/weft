@@ -59,7 +59,16 @@ public final class WeftMod {
             if (services != null) {
                 services.onLevelTickPost(e);
             }
+            dev.weft.neoforge.regiontick.RegionTopology.onLevelTickPost(e);
         });
+        // P2 increment 2: the real chunk->region mapping (RegionTopology).
+        // Always-on bookkeeping; tick ownership stays behind regionizedTicking.
+        NeoForge.EVENT_BUS.addListener(
+                dev.weft.neoforge.regiontick.RegionTopology::onChunkLoad);
+        NeoForge.EVENT_BUS.addListener(
+                dev.weft.neoforge.regiontick.RegionTopology::onChunkUnload);
+        NeoForge.EVENT_BUS.addListener(
+                dev.weft.neoforge.regiontick.RegionTopology::onLevelUnload);
         NeoForge.EVENT_BUS.addListener((net.neoforged.neoforge.event.entity.EntityJoinLevelEvent e) -> {
             if (services != null) {
                 services.onEntityJoin(e);
@@ -158,8 +167,10 @@ public final class WeftMod {
     private void onServerStopping(ServerStoppingEvent event) {
         // Pathfinding workers first: they post into the scheduler's inbox.
         dev.weft.neoforge.path.PathfindingHooks.shutdown();
-        // Level instances die with the server; drop their region-owner ids.
+        // Level instances die with the server; drop their region-owner ids
+        // and the chunk->region topology.
         dev.weft.neoforge.regiontick.RegionizedTicking.reset();
+        dev.weft.neoforge.regiontick.RegionTopology.reset();
         if (scheduler != null) {
             scheduler.close();
             scheduler = null;
