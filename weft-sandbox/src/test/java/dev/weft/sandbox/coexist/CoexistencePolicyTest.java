@@ -65,6 +65,18 @@ class CoexistencePolicyTest {
     }
 
     @Test
+    void userForceEnableCannotOutrankRefuse() {
+        // Rung 4 (true tick-ownership conflict) is the one rung R4 must not
+        // be able to override: two engines on one tick loop corrupts worlds.
+        var r = resolve(false, true, false, true, Map.of("a_engine", Posture.REFUSE));
+        assertEquals(State.REFUSED, r.state());
+        assertFalse(r.active());
+
+        var alsoEnabled = resolve(true, true, false, true, Map.of("a_engine", Posture.REFUSE));
+        assertEquals(State.REFUSED, alsoEnabled.state());
+    }
+
+    @Test
     void userForceDisableOutranksEverything() {
         var r = resolve(true, true, true, true, Map.of());
         assertEquals(State.DISABLED_FORCED, r.state());

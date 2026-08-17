@@ -5,7 +5,7 @@
 # Updating compat for a new mod is a one-line PR here.
 #
 # Current Weft module ids: profiler, spawn_density, activation, pathfinding,
-# entity_sharding.
+# entity_sharding, regionized_ticking.
 # (Any mod that patches entity-tick internals directly is a tick-ownership
 # overlap for entity_sharding: posture "refuse", per RFC-0004 sec. 3. No such
 # NeoForge mod is known today; add its modid here the day one appears.)
@@ -38,3 +38,25 @@ pathfinding = "yield"
 [alternate_current]
 # Seed for WS-3 redstone compilation (RFC-0002): their implementation runs.
 ws3_redstone = "yield"
+
+# Tick-ownership engines (RFC-0001 sec. 7.1 Tier 3, RFC-0003 sec. 3): two
+# schedulers cannot own one tick loop. Refuse loudly - a clear "choose one"
+# report at load, never a mystery crash - for P2 regionized ticking and WS-10
+# sharding alike. Modids are best-effort seeds for the known NeoForge-facing
+# Folia ports/hybrids; correcting one is a one-line PR.
+
+[forgia]
+regionized_ticking = "refuse"
+entity_sharding = "refuse"
+
+[neofolia]
+regionized_ticking = "refuse"
+entity_sharding = "refuse"
+
+[foliage]
+regionized_ticking = "refuse"
+entity_sharding = "refuse"
+
+[eturlia]
+regionized_ticking = "refuse"
+entity_sharding = "refuse"

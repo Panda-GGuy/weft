@@ -52,6 +52,17 @@ public final class CoexistencePolicy {
         if (forceDisabled) {
             return new Resolution(State.DISABLED_FORCED, "user override (forceDisableModules)");
         }
+        // Rung 4 out-ranks the user's force-enable: R4 licenses out-ranking a
+        // *yield*, never an ownership conflict — two engines on one tick loop
+        // is the one thing no config knob may authorize. A module that is off
+        // anyway has no territory claim, so nothing is reported for it.
+        if (enabledByConfig || forceEnabled) {
+            for (Map.Entry<String, Posture> e : neighborPostures.entrySet()) {
+                if (e.getValue() == Posture.REFUSE) {
+                    return new Resolution(State.REFUSED, "ownership conflict with " + e.getKey());
+                }
+            }
+        }
         if (forceEnabled) {
             // R4 lets the user out-rank a yield, but nothing can out-rank a
             // hook that is not there.
@@ -63,11 +74,6 @@ public final class CoexistencePolicy {
         }
         if (!enabledByConfig) {
             return new Resolution(State.DISABLED_CONFIG, "config switch off");
-        }
-        for (Map.Entry<String, Posture> e : neighborPostures.entrySet()) {
-            if (e.getValue() == Posture.REFUSE) {
-                return new Resolution(State.REFUSED, "ownership conflict with " + e.getKey());
-            }
         }
         for (Map.Entry<String, Posture> e : neighborPostures.entrySet()) {
             if (e.getValue() == Posture.YIELD) {

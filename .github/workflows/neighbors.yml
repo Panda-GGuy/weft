@@ -1,0 +1,56 @@
+name: neighbors
+
+# RFC-0003 R7: "CI boots the neighbors." Each cell boots a dedicated server
+# with a stub jar carrying a known neighbor's modid (posture resolution keys
+# on modid presence — see scripts/neighbors/) and asserts the expected R5
+# posture table line plus a clean startup. Catches registry regressions and
+# ladder-logic regressions with zero network dependence on real mod files.
+
+on:
+  schedule:
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+
+jobs:
+  neighbor-boot:
+    name: "boot with ${{ matrix.neighbor }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - neighbor: spark
+            # Rung 1: two observers compose; the profiler stays active.
+            expectations: 'profiler +ACTIVE|cooperating with spark'
+          - neighbor: lithium
+            # Rung 1: different levers on the same subsystems (see registry).
+            expectations: 'pathfinding +ACTIVE|cooperating with lithium'
+          - neighbor: asyncpathfinding
+            # Rung 2: a dedicated async-pathfinding mod owns WS-2's territory.
+            expectations: 'pathfinding +YIELDED|to asyncpathfinding'
+          - neighbor: forgia
+            # Rung 4: a tick-ownership engine. regionizedTicking is enabled in
+            # the cell's config so the conflict actually resolves (a module
+            # that is off has no territory claim and stays quietly DISABLED).
+            expectations: 'regionized_ticking +REFUSED|ownership conflict with forgia|conflicts with another installed mod'
+            weft_config: 'regionizedTicking = true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Boot with stub neighbor and assert posture
+        env:
+          WEFT_CONFIG_TOML: ${{ matrix.weft_config || '' }}
+        run: |
+          IFS='|' read -ra EXPECT <<< "${{ matrix.expectations }}"
+          bash scripts/neighbors/neighbor-boot-test.sh "${{ matrix.neighbor }}" "${EXPECT[@]}"
+      - name: Upload server log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: neighbor-boot-${{ matrix.neighbor }}-log
+          path: build/neighbors/*.log
