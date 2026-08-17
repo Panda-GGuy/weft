@@ -162,6 +162,33 @@ state a message touches; that rewiring belongs to the parallel-regions
 increment (E1), not this one. Cost of the feed is a map update per chunk
 load/unload; the nightly `loadgen_fresh_chunk_load` trend line guards it.
 
+**P2 increment 3 — the legacy lane goes live** (2026-08-17, same day):
+RFC-0001 §7.2's load-bearing guarantee is now real code behind `legacyLane`
+(default OFF, module `legacy_lane`). Tick work owned by **Tier-2
+(unverified) mods** — block entities and entities classified by registry
+namespace, defaulting to legacy per §7.1 — is extracted at two fail-loud
+seams (the single `TickingBlockEntity.tick()` call site inside
+`tickBlockEntities`, and vanilla's own per-entity consumer inside the entity
+section) and executed in the engine's **LEGACY phase** instead:
+single-threaded, on the server thread, in vanilla's iteration order, between
+vanilla ticks against a fully settled world, at the same game time the unit
+would have seen inline — with **per-mod cost attribution** (the §9.1 "your
+tick is 61% mod X" number, in `/weft status`). Deferral safety leans on
+vanilla's own re-checks at execution time (removed BEs are null-tickers; the
+entity consumer re-tests removal/despawn/ticking-range). Gates: the parity
+suite runs its Weft-owned phase with the lane **active** and asserts zero
+extractions on all-vanilla content (zero-residue guard, still bit-identical
+E0), and a new hard gametest (`p2legacy`) force-classifies vanilla types as
+legacy to prove the §7.2 contract end to end — per-tick engagement counters,
+LEGACY thread-context + server-thread execution, per-mod attribution, and
+**bit-identical furnace end state** against an inline control at equal
+executed-tick counts. Honest scoping: with every tick section still
+server-thread serial, the lane changes *where in the server tick* Tier-2
+work runs, nothing else — its value is the seam, the accounting, and the
+contract gate existing *before* parallel regions makes extraction
+load-bearing. Known gap, documented for the E1 increment: a legacy passenger
+riding a vanilla vehicle is ticked by the vehicle inline, not via the lane.
+
 **RFC-0002/0003 workstreams started** (2026-08-16): every Weft optimization
 module now walks the [RFC-0003](docs/RFC-0003-coexistence-policy.md)
 coexistence ladder at startup — independent kill switch, known-neighbor

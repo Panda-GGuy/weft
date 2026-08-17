@@ -3,6 +3,7 @@ package dev.weft.neoforge.coexist;
 import com.mojang.logging.LogUtils;
 import dev.weft.neoforge.WeftConfig;
 import dev.weft.neoforge.activation.ActivationHooks;
+import dev.weft.neoforge.legacy.LegacyRouting;
 import dev.weft.neoforge.regiontick.RegionizedTicking;
 import dev.weft.neoforge.service.SpawnDensityHooks;
 import dev.weft.neoforge.service.SpawnDensityMode;
@@ -93,7 +94,13 @@ public final class WeftModules {
                     // R2's reserved case), so this is belt-and-braces.
                     RegionizedTicking::hooksApplied,
                     RegionizedTicking::setActive,
-                    RegionizedTicking::statusDetail));
+                    RegionizedTicking::statusDetail),
+            new Def("legacy_lane", "P2 legacy lane (Tier-2 tick extraction)",
+                    () -> WeftConfig.LEGACY_LANE,
+                    // Extraction seams are fail-loud too (weft.mixins.json).
+                    LegacyRouting::hooksApplied,
+                    LegacyRouting::setActive,
+                    LegacyRouting::statusDetail));
 
     private static volatile NeighborRegistry registry;
     private static volatile boolean resolvedOnce;

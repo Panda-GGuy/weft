@@ -45,10 +45,10 @@ class ModClassifierTest {
         lane.register("modB", () -> order.append("B"));
         lane.register("modA", () -> order.append("A"));
 
-        var costs = lane.runAll();
+        assertEquals(3, lane.runTick());
         assertEquals("ABA", order.toString(), "deterministic registration order");
-        assertEquals(3, costs.size());
-        assertEquals("modA", costs.get(0).sourceModId());
-        assertTrue(costs.stream().allMatch(k -> k.nanos() >= 0));
+        assertEquals(3, lane.unitsByMod().values().stream().mapToLong(Long::longValue).sum());
+        assertEquals(2L, lane.unitsByMod().get("modA"));
+        assertTrue(lane.costByModNanos().values().stream().allMatch(n -> n >= 0));
     }
 }

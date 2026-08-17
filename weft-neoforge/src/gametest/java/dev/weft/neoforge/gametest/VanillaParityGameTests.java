@@ -2,6 +2,7 @@ package dev.weft.neoforge.gametest;
 
 import dev.weft.neoforge.activation.ActivationHooks;
 import dev.weft.neoforge.coexist.WeftModules;
+import dev.weft.neoforge.legacy.LegacyRouting;
 import dev.weft.neoforge.parity.WorldDigest;
 import dev.weft.neoforge.path.PathfindingHooks;
 import dev.weft.neoforge.regiontick.RegionizedTicking;
@@ -36,7 +37,11 @@ import java.util.SortedMap;
  *   <li><b>Weft-owned</b> — {@code regionizedTicking} active: every entity and
  *       block-entity section routed through the engine. Digest must match
  *       Control A, and the engine must actually have owned the sections
- *       (vacuous-run guard), so a silently-inert flag cannot pass.</li>
+ *       (vacuous-run guard), so a silently-inert flag cannot pass. The legacy
+ *       lane (increment 3) is active too: with only vanilla content present,
+ *       its classification wrap must extract <em>zero</em> units and leave
+ *       the digest bit-identical — the lane's zero-residue-on-vanilla
+ *       claim.</li>
  * </ol>
  *
  * <p>Hard gate ({@code required = true}): increment 1 is bit-identical by
@@ -78,9 +83,10 @@ public class VanillaParityGameTests {
         PathfindingHooks.setActive(false);
         SpawnDensityHooks.setActive(false);
         RegionizedTicking.setActive(false);
+        LegacyRouting.setActive(false);
 
         List<SortedMap<String, String>> digests = new ArrayList<>();
-        long[] sectionsAtActivation = new long[2];
+        long[] sectionsAtActivation = new long[3];
 
         helper.runAfterDelay(SETTLE_TICKS, () -> {
             ParityScenario.reset(level, base);
@@ -117,8 +123,13 @@ public class VanillaParityGameTests {
                         + "First differences:\n" + String.join("\n", controlDiff));
             }
             RegionizedTicking.setActive(true);
+            // Increment 3 rides along: all-vanilla content, so the lane must
+            // stay empty while its classification wrap is live.
+            LegacyRouting.setActive(true);
             sectionsAtActivation[0] = RegionizedTicking.entitySections();
             sectionsAtActivation[1] = RegionizedTicking.blockEntitySections();
+            sectionsAtActivation[2] =
+                    LegacyRouting.deferredBlockEntities() + LegacyRouting.deferredEntities();
             ParityScenario.reset(level, base);
             ParityScenario.build(level, base);
         });
@@ -129,11 +140,22 @@ public class VanillaParityGameTests {
             long entitySections = RegionizedTicking.entitySections() - sectionsAtActivation[0];
             long blockEntitySections =
                     RegionizedTicking.blockEntitySections() - sectionsAtActivation[1];
+            long laneExtractions = LegacyRouting.deferredBlockEntities()
+                    + LegacyRouting.deferredEntities() - sectionsAtActivation[2];
             tearDown(level, base);
 
             if (!RegionizedTicking.hooksApplied()) {
                 helper.fail("Regionized-ticking ownership mixins did not apply (and the fail-loud "
                         + "config somehow let boot continue) - hooksApplied=false");
+            }
+            if (!LegacyRouting.hooksApplied()) {
+                helper.fail("Legacy-lane extraction mixins did not apply - hooksApplied=false");
+            }
+            // Zero-residue-on-vanilla guard (increment 3): vanilla content is
+            // Tier 0 - with the lane active, nothing may have been extracted.
+            if (laneExtractions != 0) {
+                helper.fail("Legacy lane extracted " + laneExtractions + " units from an "
+                        + "all-vanilla scenario - Tier-0 content routed to the lane (RFC-0001 §7.1)");
             }
             // Vacuous-run guard: this level ticks once per server tick, so the
             // engine must have owned at least ~RUN_TICKS sections of each kind.
@@ -196,6 +218,7 @@ public class VanillaParityGameTests {
 
     private static void tearDown(ServerLevel level, BlockPos base) {
         RegionizedTicking.setActive(false);
+        LegacyRouting.setActive(false);
         ParityScenario.reset(level, base);
         ParityScenario.restoreFloor(level, base);
         WeftBenchGameTests.forceChunks(level, base, false);

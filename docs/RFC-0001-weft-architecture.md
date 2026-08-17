@@ -472,9 +472,16 @@ green 2026-08-17). Increment 2
 RegionManagers fed by actual chunk load/unload, §4.2 invariants gated by
 the p2regions gametest — as always-on bookkeeping; owner routing stays on
 the global inbox until region workers own state (parallel-regions
-increment). Next: the legacy lane, then parallel regions and WS-10
-activation — each gated by the parity suite at its declared equivalence
-class.
+increment). Increment 3 (same day): the §7.2 legacy lane is live behind
+`legacyLane` (default off) — Tier-2 tick work extracted from the vanilla
+sections at fail-loud seams, run in the LEGACY phase (single-threaded,
+server thread, vanilla order, settled world) with per-mod cost
+attribution; gated by the parity suite (lane active, zero extractions on
+vanilla content, still bit-identical E0) plus the p2legacy contract
+gametest (engagement, LEGACY context, attribution, bit-identical furnace
+end state vs. inline control). Next: parallel regions + owner-mail
+rerouting (E1), then WS-10 activation (E2) — each gated by the parity
+suite at its declared equivalence class.
 
 ## 12. Risk register (top items)
 

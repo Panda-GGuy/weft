@@ -38,5 +38,7 @@ class ShippedNeighborRegistryTest {
                 registry.posturesFor("regionized_ticking", everyone));
         assertEquals(Map.of("forgia", Posture.REFUSE),
                 registry.posturesFor("entity_sharding", everyone));
+        assertEquals(Map.of("forgia", Posture.REFUSE),
+                registry.posturesFor("legacy_lane", everyone));
     }
 }

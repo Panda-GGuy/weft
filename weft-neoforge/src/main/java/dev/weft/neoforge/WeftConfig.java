@@ -161,6 +161,15 @@ public final class WeftConfig {
                     "(RFC-0005) is green for every increment that changes semantics.")
             .define("regionizedTicking", false);
 
+    private static final ModConfigSpec.BooleanValue LEGACY_LANE_SPEC = BUILDER
+            .comment("P2 (RFC-0001 sec. 7.2): extract Tier-2 (unverified) mods' entity and",
+                    "block-entity tick work from the vanilla sections and run it in the",
+                    "engine's serialized LEGACY phase - single-threaded, on the server",
+                    "thread, between vanilla ticks, with per-mod cost attribution. Vanilla",
+                    "and verified content is untouched. Ships off until the parity suite",
+                    "and the p2legacy contract gate are green (RFC-0005).")
+            .define("legacyLane", false);
+
     // --- RFC-0003 R4: user overrides of the coexistence ladder, both directions ---
 
     private static final ModConfigSpec.ConfigValue<List<? extends String>> FORCE_ENABLE_MODULES_SPEC = BUILDER
@@ -202,6 +211,7 @@ public final class WeftConfig {
     public static volatile boolean ENTITY_SHARDING = false;
     public static volatile int ENTITY_SHARD_MIN_BATCH = 64;
     public static volatile boolean REGIONIZED_TICKING = false;
+    public static volatile boolean LEGACY_LANE = false;
     public static volatile Set<String> FORCE_ENABLE_MODULES = Set.of();
     public static volatile Set<String> FORCE_DISABLE_MODULES = Set.of();
 
@@ -254,6 +264,7 @@ public final class WeftConfig {
         ENTITY_SHARDING = ENTITY_SHARDING_SPEC.get();
         ENTITY_SHARD_MIN_BATCH = ENTITY_SHARD_MIN_BATCH_SPEC.get();
         REGIONIZED_TICKING = REGIONIZED_TICKING_SPEC.get();
+        LEGACY_LANE = LEGACY_LANE_SPEC.get();
         FORCE_ENABLE_MODULES = Set.copyOf(FORCE_ENABLE_MODULES_SPEC.get());
         FORCE_DISABLE_MODULES = Set.copyOf(FORCE_DISABLE_MODULES_SPEC.get());
     }

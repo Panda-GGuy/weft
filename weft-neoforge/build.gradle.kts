@@ -83,6 +83,7 @@ dependencies {
     bundled(project(":weft-services"))
     "gametestImplementation"(sourceSets.main.get().output)
     "gametestImplementation"(project(":weft-engine"))
+    "gametestImplementation"(project(":weft-sandbox"))
     "gametestImplementation"(project(":weft-services"))
 }
 

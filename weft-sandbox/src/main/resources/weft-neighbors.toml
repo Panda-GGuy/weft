@@ -5,7 +5,7 @@
 # Updating compat for a new mod is a one-line PR here.
 #
 # Current Weft module ids: profiler, spawn_density, activation, pathfinding,
-# entity_sharding, regionized_ticking.
+# entity_sharding, regionized_ticking, legacy_lane.
 # (Any mod that patches entity-tick internals directly is a tick-ownership
 # overlap for entity_sharding: posture "refuse", per RFC-0004 sec. 3. No such
 # NeoForge mod is known today; add its modid here the day one appears.)
@@ -48,15 +48,19 @@ ws3_redstone = "yield"
 [forgia]
 regionized_ticking = "refuse"
 entity_sharding = "refuse"
+legacy_lane = "refuse"
 
 [neofolia]
 regionized_ticking = "refuse"
 entity_sharding = "refuse"
+legacy_lane = "refuse"
 
 [foliage]
 regionized_ticking = "refuse"
 entity_sharding = "refuse"
+legacy_lane = "refuse"
 
 [eturlia]
 regionized_ticking = "refuse"
 entity_sharding = "refuse"
+legacy_lane = "refuse"
