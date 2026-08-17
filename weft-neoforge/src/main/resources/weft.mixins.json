@@ -9,6 +9,8 @@
     "MobMixin",
     "BoundTickingBlockEntityMixin",
     "NaturalSpawnerMixin",
+    "ServerLevelRegionTickMixin",
+    "LevelRegionTickMixin",
     "EntityCounterAccessor"
   ],
   "injectors": {
