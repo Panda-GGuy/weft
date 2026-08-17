@@ -45,15 +45,15 @@ Full build including the NeoForge mod (needs maven.neoforged.net):
 
 ## Status
 
-Pre-alpha. **P0 and P1 are complete**; next phase is **P2** (regionized
-vanilla ticking + legacy lane, behind a flag). What ships today: the engine
-core with a passing concurrency test suite, the **P0 profiler** (install on
-any stock server *or single-player world* and it measures how much of your
-pack's tick Weft could parallelize), and the **P1 off-thread services** —
-the spawn-density scan authoritative by default and async pathfinding on by
-default, both fail-soft with independent kill switches. See RFC-0001 §11
-for the roadmap and §12 for the honest risk register (start with the
-Amdahl one).
+Pre-alpha. **P0 and P1 are complete; P2 is open** (regionized vanilla
+ticking + legacy lane, behind a flag — parity suite first, see below). What
+ships today: the engine core with a passing concurrency test suite, the
+**P0 profiler** (install on any stock server *or single-player world* and it
+measures how much of your pack's tick Weft could parallelize), and the
+**P1 off-thread services** — the spawn-density scan authoritative by default
+and async pathfinding on by default, both fail-soft with independent kill
+switches. See RFC-0001 §11 for the roadmap and §12 for the honest risk
+register (start with the Amdahl one).
 
 **P0 verified in-game** (2026-08-16, NeoForge 21.1.248 / MC 1.21.1): mod loads,
 all mixins apply cleanly, `/weft report` prints the regionizability report and
@@ -105,6 +105,47 @@ exit is met by two production services on the engine's
 `AsyncService`/path-worker seams. **Next phase: P2 — regionized vanilla
 ticking + legacy lane, behind a flag** — where WS-10's entity sharding
 (so far proven only at the engine level, 6.5x) meets real ticking.
+
+**P2 opened — parity suite first, then degenerate tick ownership**
+(2026-08-17): applying P1's biggest lesson (the gate exists *before* the
+change it judges), P2 started with the **vanilla-parity suite**
+([RFC-0005](docs/RFC-0005-vanilla-parity-suite.md)): a fixed machinery+mob
+arena (hopper clocks, comparators, piston+observer, clocked dropper, flowing
+water pushing items into a hopper, chest-to-chest hopper chain, furnaces
+mid-smelt, falling blocks, ten penned seeded mobs) is run three times on the
+same server — vanilla, **vanilla again** (the control: semantic world digests
+must match bit-identically, proving the harness deterministic before it may
+judge Weft), then Weft-owned — and all three digests (entity state, full BE
+NBT, per-chunk block hashes) must be equal, with vacuous-run guards on both
+the engine (owned-section counters) and the scenario (furnaces must produce,
+clocks must fire, mobs must survive). Those guards paid for themselves before
+Weft was ever judged: the first "green" run was comparing identical
+emptiness — the arena had built at bedrock level (heightmap read before its
+chunk loaded) and the population had fallen into the void; the control
+happily agreed with itself. **Tick ownership increment 1** then landed behind
+`regionizedTicking` (default OFF, RFC-0003 R1): vanilla's entity and
+block-entity tick sections route through the engine
+(`WeftScheduler.runOwnedSerial` — one region per level, serial, on the server
+thread, vanilla's own order), deliberately **bit-identical by construction**.
+What it buys is the seams, all live and gated now: the fail-loud ownership
+mixins (the `require = 1` case RFC-0003 R2 reserves for exactly this), the
+REGION thread-context around all vanilla simulation ticking, and a real
+target for the parity suite. **Parity: green at E0 (bit-identical)** on the
+full three-phase protocol, locally (2026-08-17) and nightly via WS-8. Also
+landed: the RFC-0001 §12 **kill -9 during-save CI harness** (`chaos.yml` —
+dedicated server, forceloaded chunk plate, `save-all` then `kill -9` mid-save
+×4, world must boot clean) and the **RFC-0003 R7 neighbor-boot matrix**
+(`neighbors.yml` — stub modids exercise cooperate/yield/refuse postures
+end-to-end, including Forgia/NeoFolia-class tick-ownership engines now
+seeded as `refuse` in the registry) — both nightly workflows, authored and
+syntax-checked 2026-08-17 with first scheduled executions pending, so treat
+them as unproven until they have a green run — plus a coexistence-policy fix
+the R7 work surfaced: **force-enable can no longer out-rank a REFUSE** — R4
+licenses overriding a yield, never an ownership conflict (unit-gated in
+`CoexistencePolicyTest`). Next increments (region
+assignment from real chunk positions, the legacy lane, parallel regions,
+WS-10 activation) each stay off until the parity suite is green at their
+declared equivalence class (RFC-0005 §4).
 
 **RFC-0002/0003 workstreams started** (2026-08-16): every Weft optimization
 module now walks the [RFC-0003](docs/RFC-0003-coexistence-policy.md)

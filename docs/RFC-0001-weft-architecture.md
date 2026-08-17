@@ -459,10 +459,17 @@ scan, periodic verify ticks) and async pathfinding is on by default after
 clearing its 300-zombie acceptance world at ~50% entity-phase reduction;
 the exit criterion measured as a −5.0% full-tick MSPT delta (p95 −7%) on
 the stock benchmark world, same-run A/B, tracked nightly. See the README
-Status section for the honest numbers and caveats. **P2 is next**:
-regionized vanilla ticking + the legacy lane behind a flag — where WS-10's
-entity sharding (engine-benchmark-proven at 6.5x, RFC-0004) first meets
-real ticking.
+Status section for the honest numbers and caveats. **P2 open** (same day):
+the vanilla-parity suite (RFC-0005 — control-run discipline, semantic world
+digest, hard gametest gate) landed *before* the first ownership mixin, then
+tick-ownership increment 1 behind `regionizedTicking` (default off):
+entity + block-entity ticking routed through the engine as one serial
+region per level on the server thread — bit-identical by construction,
+parity green at RFC-0005 class E0. The §12 kill -9 save-recoverability
+harness and the RFC-0003 R7 neighbor-boot matrix run in CI. Next: region
+assignment from real chunk positions and the legacy lane, then parallel
+regions and WS-10 activation — each gated by the parity suite at its
+declared equivalence class.
 
 ## 12. Risk register (top items)
 
