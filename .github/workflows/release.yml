@@ -1,0 +1,38 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: "Build and publish release"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Build and test everything
+        run: gradle build -PwithNeoForge
+      - name: Create GitHub release with mod jar
+        uses: softprops/action-gh-release@v2
+        with:
+          files: weft-neoforge/build/libs/weft-neoforge-*.jar
+          # -alpha / -beta tags are marked pre-release automatically
+          prerelease: ${{ contains(github.ref_name, '-alpha') || contains(github.ref_name, '-beta') }}
+          generate_release_notes: true
+          body: |
+            **Requires NeoForge 21.1.x on Minecraft 1.21.1** (note: NeoForge
+            21.11.x is for MC 1.21.11 and will not work).
+
+            Drop `weft-neoforge-*.jar` into your `mods/` folder — works in
+            single player (integrated server) and on dedicated servers.
+            This phase is the P0 profiler + P1 shadow services: it measures
+            your pack (`/weft report`, `/weft services`) and does not yet
+            reroute simulation. See the README and RFC-0001 for the roadmap.
