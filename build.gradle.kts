@@ -54,6 +54,14 @@ subprojects {
         tasks.register<JavaExec>("jmh") {
             group = "verification"
             description = "Run JMH benchmarks; JSON results to build/reports/jmh/results.json."
+            // JMH holds a machine-global lock (/tmp/jmh.lock), and concurrent
+            // benchmark JVMs would share CPU and corrupt each other's numbers
+            // anyway — serialize the modules' jmh tasks (org.gradle.parallel
+            // is on, so `gradle :weft-engine:jmh :weft-services:jmh` would
+            // otherwise overlap them; broke the first bench.yml run).
+            if (project.name == "weft-services") {
+                mustRunAfter(":weft-engine:jmh")
+            }
             classpath = jmhSet.runtimeClasspath
             mainClass.set("org.openjdk.jmh.Main")
             val resultFile = layout.buildDirectory.file("reports/jmh/results.json")
