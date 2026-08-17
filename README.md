@@ -48,6 +48,13 @@ single-player world* (it hooks the integrated server too) and it measures how
 much of your pack's tick Weft could parallelize. See RFC-0001 §11 for the
 roadmap and §12 for the honest risk register (start with the Amdahl one).
 
+**P0 verified in-game** (2026-08-16, NeoForge 21.1.248 / MC 1.21.1): mod loads,
+all mixins apply cleanly, `/weft report` prints the regionizability report and
+writes `weft-report.txt`, the 60-second console summary fires, and profiling
+overhead is negligible (~two `System.nanoTime()` calls per entity/BE tick).
+Profiling is toggleable at runtime with `/weft profile on|off`; tunables live
+in `config/weft-common.toml`.
+
 ## Trying the P0 profiler locally
 
 1. Build the jar: \`./gradlew :weft-neoforge:build -PwithNeoForge\`
