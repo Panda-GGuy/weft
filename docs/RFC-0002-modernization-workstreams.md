@@ -135,6 +135,21 @@ load generator (GameTest-driven joins, movement, chunk loading). Nightly CI
 job records timings and fails on regression beyond noise bands. Every WS-1..6
 acceptance criterion becomes a tracked benchmark.
 
+- Shipped: JMH source sets in `weft-engine`/`weft-services` gated nightly by
+  `bench.yml`; benchmark world = the GameTest server's flat seed-0 world plus
+  a fixed-seed population builder (`BenchmarkWorld`, the WS-1 2k+500 layout);
+  load generator = `LoadBot` (FakePlayer join/movement/chunk loading) driven
+  by `@GameTest`s in `weft-neoforge/src/gametest` on the headless
+  `runGameTestServer` run, results tracked by the same nightly gate
+  (`weft-bench.json`, `customSmallerIsBetter`).
+- WS-1 acceptance runs as two gametests: the 32-block behavior-parity rule is
+  a hard gate (`ws1BehaviorParityNearPlayers`, checked every activated tick);
+  the >=30% entity-phase reduction is measured and tracked nightly
+  (`ws1EntityPhaseReduction`, optional until met — first full run: 18.5%
+  reduction with 92% of throttleable AI ticks skipped, so clearing the bar
+  needs WS-1 to gate more of the mob tick, not tuning). WS-2..6 criteria join
+  the same harness as they land.
+
 ### WS-9: Network egress batching
 Phase 6 (EGRESS) grows: off-netty-thread packet serialization, entity-tracker
 delta deduplication (don't resend unchanged metadata), chunk-send
