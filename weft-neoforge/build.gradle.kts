@@ -24,8 +24,13 @@ neoForge {
     addModdingDependenciesTo(gametest)
 
     runs {
+        // Fixed game directory: the chaos kill -9 harness and the R7
+        // neighbor-boot matrix (scripts/chaos/, scripts/neighbors/) prepare
+        // eula/server.properties/mods here and locate the server process by
+        // its working directory.
         create("server") {
             server()
+            gameDirectory = layout.projectDirectory.dir("run/server")
         }
         create("client") {
             client()
