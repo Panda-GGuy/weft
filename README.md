@@ -42,10 +42,26 @@ Full build including the NeoForge mod (needs maven.neoforged.net):
 
 ## Status
 
-Pre-alpha. Current phase: **P1** — engine core with a passing concurrency test
-suite; the NeoForge module runs the pipeline in telemetry mode alongside the
-vanilla tick. See RFC-0001 §11 for the roadmap and §12 for the honest risk
-register (start with the Amdahl one).
+Pre-alpha. Current phase: **P0/P1** — engine core with a passing concurrency
+test suite, plus the **P0 profiler**: install the mod on any stock server *or
+single-player world* (it hooks the integrated server too) and it measures how
+much of your pack's tick Weft could parallelize. See RFC-0001 §11 for the
+roadmap and §12 for the honest risk register (start with the Amdahl one).
+
+## Trying the P0 profiler locally
+
+1. Build the jar: \`./gradlew :weft-neoforge:build -PwithNeoForge\`
+   (or grab \`weft-neoforge-jar\` from the latest green Actions run).
+2. Drop \`weft-neoforge/build/libs/weft-neoforge-*.jar\` into your NeoForge
+   1.21.1 \`mods/\` folder — works in single player (integrated server) and on
+   dedicated servers.
+3. Play a minute, then run \`/weft report\` (needs op / cheats). You get the
+   regionizability report in chat and \`weft-report.txt\` in the game dir:
+   parallelizable fraction, hypothetical region count, estimated speedup at
+   2/4/8/16 workers, and the top cost sources in your pack.
+
+Dev workflow: \`./gradlew :weft-neoforge:runClient -PwithNeoForge\` launches a
+dev client with the mod loaded.
 
 ## Design tenets
 

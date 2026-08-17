@@ -1,7 +1,7 @@
 // weft-neoforge: the actual NeoForge mod. Requires maven.neoforged.net —
 // enabled via -PwithNeoForge (see settings.gradle.kts). Built on CI.
 plugins {
-    id("net.neoforged.moddev") version providers.gradleProperty("moddev_plugin_version").get()
+    id("net.neoforged.moddev") // version resolved in settings.gradle.kts pluginManagement
 }
 
 neoForge {

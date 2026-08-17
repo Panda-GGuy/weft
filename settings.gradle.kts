@@ -4,6 +4,11 @@ pluginManagement {
         gradlePluginPortal()
         maven("https://maven.neoforged.net/releases")
     }
+    // Plugin versions must resolve here (settings context) — a module's
+    // plugins{} block cannot read gradle.properties via `providers`.
+    plugins {
+        id("net.neoforged.moddev") version providers.gradleProperty("moddev_plugin_version").get()
+    }
 }
 
 rootProject.name = "weft"

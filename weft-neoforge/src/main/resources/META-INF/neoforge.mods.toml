@@ -1,7 +1,7 @@
 modLoader = "javafml"
 loaderVersion = "[4,)"
 license = "LGPL-3.0"
-issueTrackerURL = "https://github.com/REPLACE_OWNER/weft/issues"
+issueTrackerURL = "https://github.com/Panda-GGuy/weft/issues"
 
 [[mods]]
 modId = "weft"
@@ -20,14 +20,14 @@ modId = "neoforge"
 type = "required"
 versionRange = "[21.1,)"
 ordering = "NONE"
-side = "SERVER"
+side = "BOTH"
 
 [[dependencies.weft]]
 modId = "minecraft"
 type = "required"
 versionRange = "[1.21.1,1.22)"
 ordering = "NONE"
-side = "SERVER"
+side = "BOTH"
 
 [[mixins]]
 config = "weft.mixins.json"

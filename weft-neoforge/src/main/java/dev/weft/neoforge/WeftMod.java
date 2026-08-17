@@ -1,13 +1,17 @@
 package dev.weft.neoforge;
 
+import com.mojang.logging.LogUtils;
 import dev.weft.engine.graph.GraphScheduler;
 import dev.weft.engine.region.RegionManager;
 import dev.weft.engine.sched.WeftScheduler;
+import dev.weft.neoforge.profiler.WeftProfiler;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.neoforge.common.NeoForge;
+import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.neoforged.neoforge.event.server.ServerAboutToStartEvent;
 import net.neoforged.neoforge.event.server.ServerStoppingEvent;
+import org.slf4j.Logger;
 
 /**
  * Mod entry point. P1 scope (RFC-0001 §11): stand the engine up alongside the
@@ -22,9 +26,12 @@ public final class WeftMod {
     private static WeftScheduler scheduler;
     private static RegionManager regions;
 
+    private static final Logger LOGGER = LogUtils.getLogger();
+
     public WeftMod(IEventBus modBus) {
         NeoForge.EVENT_BUS.addListener(this::onServerAboutToStart);
         NeoForge.EVENT_BUS.addListener(this::onServerStopping);
+        NeoForge.EVENT_BUS.addListener((RegisterCommandsEvent e) -> WeftCommands.register(e));
     }
 
     private void onServerAboutToStart(ServerAboutToStartEvent event) {
@@ -45,6 +52,15 @@ public final class WeftMod {
 
     /** Called by MinecraftServerMixin each vanilla tick (telemetry mode). */
     public static void onVanillaTick() {
+        WeftProfiler profiler = WeftProfiler.get();
+        profiler.onTickStart();
+
+        // Periodic P0 summary so headless/dedicated runs get data without /weft.
+        if (WeftConfig.REPORT_LOG_INTERVAL_TICKS > 0
+                && profiler.tickCounter() % WeftConfig.REPORT_LOG_INTERVAL_TICKS == 0) {
+            LOGGER.info("\n{}", profiler.buildReport());
+        }
+
         if (scheduler == null) {
             return;
         }
