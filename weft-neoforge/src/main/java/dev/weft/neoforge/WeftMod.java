@@ -94,6 +94,11 @@ public final class WeftMod {
         return s == null ? java.util.List.of("Server not running.") : s.statusLines();
     }
 
+    /** The live services container, or null outside server runtime (mixin entry path). */
+    public static WeftServices servicesOrNull() {
+        return services;
+    }
+
     // WS-10 (RFC-0004): the coexistence resolution owns this flag; the
     // scheduler is created after the first resolve, so remember it here and
     // apply on both creation and re-resolution.

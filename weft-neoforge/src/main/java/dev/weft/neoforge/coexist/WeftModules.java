@@ -3,6 +3,8 @@ package dev.weft.neoforge.coexist;
 import com.mojang.logging.LogUtils;
 import dev.weft.neoforge.WeftConfig;
 import dev.weft.neoforge.activation.ActivationHooks;
+import dev.weft.neoforge.service.SpawnDensityHooks;
+import dev.weft.neoforge.service.SpawnDensityMode;
 import dev.weft.sandbox.coexist.CoexistencePolicy;
 import dev.weft.sandbox.coexist.NeighborRegistry;
 import dev.weft.sandbox.coexist.Posture;
@@ -56,11 +58,14 @@ public final class WeftModules {
                     () -> true, // core mixins are fail-loud; reaching here means they applied
                     active -> WeftConfig.PROFILING_ENABLED = active,
                     () -> ""),
-            new Def("spawn_shadow", "P1 spawn-density shadow service",
-                    () -> WeftConfig.SPAWN_SERVICE_SHADOW,
-                    () -> true, // event-fed, no optional mixins
-                    active -> WeftConfig.SPAWN_SERVICE_SHADOW = active,
-                    () -> ""),
+            new Def("spawn_density", "P1 spawn-density service",
+                    () -> WeftConfig.SPAWN_DENSITY_MODE != SpawnDensityMode.OFF,
+                    // R2: AUTHORITATIVE needs the tickChunks mixin; SHADOW is
+                    // event-fed and needs none.
+                    () -> WeftConfig.SPAWN_DENSITY_MODE != SpawnDensityMode.AUTHORITATIVE
+                            || SpawnDensityHooks.hooksApplied(),
+                    SpawnDensityHooks::setActive,
+                    () -> "mode " + WeftConfig.SPAWN_DENSITY_MODE),
             new Def("activation", "WS-1 entity activation scheduling",
                     () -> WeftConfig.ACTIVATION_SCHEDULING,
                     ActivationHooks::hooksApplied,

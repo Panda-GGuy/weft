@@ -1,5 +1,6 @@
 package dev.weft.neoforge;
 
+import dev.weft.neoforge.service.SpawnDensityMode;
 import net.neoforged.fml.event.config.ModConfigEvent;
 import net.neoforged.neoforge.common.ModConfigSpec;
 
@@ -48,12 +49,21 @@ public final class WeftConfig {
             .comment("How many cost sources the report lists.")
             .defineInRange("reportTopTypes", 12, 1, 100);
 
-    private static final ModConfigSpec.BooleanValue SPAWN_SERVICE_SHADOW_SPEC = BUILDER
-            .comment("P1 shadow mode: recompute the spawn-density scan off-thread each tick",
-                    "and compare against vanilla (which stays authoritative). Costs a few",
-                    "microseconds of capture per level tick; produces parity data via",
-                    "/weft services.")
-            .define("spawnServiceShadow", true);
+    private static final ModConfigSpec.EnumValue<SpawnDensityMode> SPAWN_DENSITY_MODE_SPEC = BUILDER
+            .comment("P1 spawn-density service (RFC-0001 sec. 11). OFF: vanilla only.",
+                    "SHADOW: recompute the scan off-thread and diff against vanilla, which",
+                    "stays authoritative (parity data via /weft services). AUTHORITATIVE:",
+                    "vanilla's per-tick createState scan is replaced by the off-thread",
+                    "result (one tick stale by design); any tick the result isn't fresh",
+                    "falls back to vanilla's synchronous scan. Default AUTHORITATIVE on the",
+                    "strength of the shadow-mode parity evidence (see README Status).")
+            .defineEnum("spawnDensityMode", SpawnDensityMode.AUTHORITATIVE);
+
+    private static final ModConfigSpec.IntValue SPAWN_DENSITY_VERIFY_INTERVAL_TICKS_SPEC = BUILDER
+            .comment("In AUTHORITATIVE mode, run vanilla's synchronous scan anyway every N",
+                    "ticks, use it for that tick, and diff our async result against it so",
+                    "parity evidence keeps flowing after graduation. 0 = never verify.")
+            .defineInRange("spawnDensityVerifyIntervalTicks", 200, 0, Integer.MAX_VALUE);
 
     private static final ModConfigSpec.IntValue CENSUS_RECONCILE_INTERVAL_TICKS_SPEC = BUILDER
             .comment("How often (ticks) the incremental entity census is reconciled against a",
@@ -115,8 +125,10 @@ public final class WeftConfig {
                     "Weft worker threads; results apply at the next tick boundary while",
                     "the mob keeps following its previous path. Node evaluation stays",
                     "vanilla's own (modded NodeEvaluators respected). Independent kill",
-                    "switch (RFC-0003 R1); ships off pending in-game acceptance runs.")
-            .define("asyncPathfinding", false);
+                    "switch (RFC-0003 R1). Default ON since the in-world acceptance run:",
+                    "59% entity-phase reduction on the WS-2 300-zombie stress world and",
+                    "~0% (no harm) on path-light worlds; see README Status.")
+            .define("asyncPathfinding", true);
 
     private static final ModConfigSpec.IntValue PATHFINDING_THREADS_SPEC = BUILDER
             .comment("Worker threads for the pathfinding service. Takes effect when the",
@@ -160,7 +172,8 @@ public final class WeftConfig {
     public static volatile int PROFILE_WINDOW_TICKS = 100;
     public static volatile int REPORT_LOG_INTERVAL_TICKS = 1200;
     public static volatile int REPORT_TOP_TYPES = 12;
-    public static volatile boolean SPAWN_SERVICE_SHADOW = true;
+    public static volatile SpawnDensityMode SPAWN_DENSITY_MODE = SpawnDensityMode.AUTHORITATIVE;
+    public static volatile int SPAWN_DENSITY_VERIFY_INTERVAL_TICKS = 200;
     public static volatile int CENSUS_RECONCILE_INTERVAL_TICKS = 200;
     public static volatile int[] SPEEDUP_WORKER_COUNTS = {2, 4, 8, 16};
     public static volatile boolean ACTIVATION_SCHEDULING = false;
@@ -172,7 +185,7 @@ public final class WeftConfig {
             "minecraft:ender_dragon", "minecraft:wither",
             "minecraft:warden", "minecraft:elder_guardian");
     public static volatile Map<String, Integer> ACTIVATION_TYPE_OVERRIDES = Map.of();
-    public static volatile boolean ASYNC_PATHFINDING = false;
+    public static volatile boolean ASYNC_PATHFINDING = true;
     public static volatile int PATHFINDING_THREADS = 2;
     public static volatile boolean ENTITY_SHARDING = false;
     public static volatile int ENTITY_SHARD_MIN_BATCH = 64;
@@ -204,7 +217,8 @@ public final class WeftConfig {
         PROFILE_WINDOW_TICKS = PROFILE_WINDOW_TICKS_SPEC.get();
         REPORT_LOG_INTERVAL_TICKS = REPORT_LOG_INTERVAL_TICKS_SPEC.get();
         REPORT_TOP_TYPES = REPORT_TOP_TYPES_SPEC.get();
-        SPAWN_SERVICE_SHADOW = SPAWN_SERVICE_SHADOW_SPEC.get();
+        SPAWN_DENSITY_MODE = SPAWN_DENSITY_MODE_SPEC.get();
+        SPAWN_DENSITY_VERIFY_INTERVAL_TICKS = SPAWN_DENSITY_VERIFY_INTERVAL_TICKS_SPEC.get();
         CENSUS_RECONCILE_INTERVAL_TICKS = CENSUS_RECONCILE_INTERVAL_TICKS_SPEC.get();
         SPEEDUP_WORKER_COUNTS = SPEEDUP_WORKER_COUNTS_SPEC.get().stream()
                 .mapToInt(Integer::intValue).toArray();

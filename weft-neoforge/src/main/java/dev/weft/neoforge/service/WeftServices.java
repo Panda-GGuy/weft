@@ -1,39 +1,62 @@
 package dev.weft.neoforge.service;
 
+import com.mojang.logging.LogUtils;
 import dev.weft.engine.service.AsyncServiceRunner;
 import dev.weft.engine.service.EntityCensus;
 import dev.weft.neoforge.WeftConfig;
+import dev.weft.neoforge.mixin.optimization.ServerChunkCacheAccessor;
+import dev.weft.neoforge.mixin.optimization.SpawnStateInvoker;
+import dev.weft.neoforge.profiler.WeftProfiler;
+import it.unimi.dsi.fastutil.objects.Object2IntMap;
+import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.QuartPos;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.MobCategory;
+import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.LocalMobCapCalculator;
+import net.minecraft.world.level.NaturalSpawner;
+import net.minecraft.world.level.biome.MobSpawnSettings;
+import net.minecraft.world.level.chunk.LevelChunk;
 import net.neoforged.neoforge.event.entity.EntityEvent;
 import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
 import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
 import net.neoforged.neoforge.event.tick.LevelTickEvent;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Supplier;
 
 /**
  * Owns the per-level {@link AsyncServiceRunner}s for P1 services and the
- * shadow-mode parity bookkeeping (RFC-0001 §11 P1).
+ * spawn-density bookkeeping (RFC-0001 §11 P1).
  *
  * <p>Each server level tick end: capture the spawn snapshot (server thread,
- * O(entities), plain primitive arrays), hand it to the runner, and compare
- * the PREVIOUS tick's published result against vanilla's fresh
- * {@code lastSpawnState} — that is exactly the staleness an authoritative
- * async spawn scan would exhibit, so parity numbers here are the evidence
- * for (or against) flipping it on. Small transient deltas are expected
- * (entities spawn/die between the chunk tick and tick end); what matters is
- * the distribution, not occasional off-by-a-few.
+ * O(entities), plain primitive arrays) and hand it to the runner. In SHADOW
+ * mode the PREVIOUS tick's published result is compared against vanilla's
+ * fresh {@code lastSpawnState} — exactly the staleness an authoritative
+ * async spawn scan exhibits, so parity numbers are the evidence for (or
+ * against) graduation. In AUTHORITATIVE mode
+ * ({@link #createStateAuthoritative}) the published result replaces
+ * vanilla's synchronous scan, with vanilla as the per-tick fallback whenever
+ * the result isn't exactly one tick stale, and periodic verify ticks that
+ * run vanilla's scan anyway and keep the parity evidence flowing.
  */
 public final class WeftServices implements AutoCloseable {
 
+    private static final org.slf4j.Logger LOGGER = LogUtils.getLogger();
+
     private static final int CATEGORY_COUNT = MobCategory.values().length;
+    private static final MobCategory[] CATEGORIES = MobCategory.values();
 
     private static final class LevelServices {
         final AsyncServiceRunner<SpawnDensityService.Snapshot, SpawnDensityService.Densities> spawnDensity;
@@ -41,6 +64,18 @@ public final class WeftServices implements AutoCloseable {
         final AtomicLong parityMismatchTicks = new AtomicLong();
         final AtomicLong captureNanosLast = new AtomicLong();
         volatile String lastMismatch = "";
+
+        // Authoritative-mode bookkeeping (server thread writes, /weft reads).
+        final AtomicLong authoritativeTicks = new AtomicLong();
+        final AtomicLong fallbackTicks = new AtomicLong();
+        final AtomicLong buildNanosLast = new AtomicLong();
+        final AtomicLong buildFailStreak = new AtomicLong();
+        long lastConsumedTick = Long.MIN_VALUE; // server thread only
+
+        // Entity types with a MobSpawnCost in ANY biome of this level's
+        // registry (usually a handful: soul-sand-valley skeleton/ghast/
+        // enderman + modded). Only these pay a biome lookup at capture.
+        volatile Set<EntityType<?>> chargedTypes;
 
         // Incremental census (server-thread-only): event-fed candidate to
         // replace the O(population) capture. Runs in drift-measurement mode:
@@ -76,7 +111,7 @@ public final class WeftServices implements AutoCloseable {
     // --- census event feed (server thread; drift-measurement mode) ---
 
     public void onEntityJoin(EntityJoinLevelEvent event) {
-        if (WeftConfig.SPAWN_SERVICE_SHADOW && event.getLevel() instanceof ServerLevel level) {
+        if (SpawnDensityHooks.moduleActive() && event.getLevel() instanceof ServerLevel level) {
             MobCategory category = capCategoryOf(event.getEntity());
             if (category != null) {
                 servicesOf(level).census.add(event.getEntity().getId(), category.ordinal(),
@@ -86,13 +121,13 @@ public final class WeftServices implements AutoCloseable {
     }
 
     public void onEntityLeave(EntityLeaveLevelEvent event) {
-        if (WeftConfig.SPAWN_SERVICE_SHADOW && event.getLevel() instanceof ServerLevel level) {
+        if (SpawnDensityHooks.moduleActive() && event.getLevel() instanceof ServerLevel level) {
             servicesOf(level).census.remove(event.getEntity().getId());
         }
     }
 
     public void onEnteringSection(EntityEvent.EnteringSection event) {
-        if (WeftConfig.SPAWN_SERVICE_SHADOW && event.didChunkChange()
+        if (SpawnDensityHooks.moduleActive() && event.didChunkChange()
                 && event.getEntity().level() instanceof ServerLevel level) {
             servicesOf(level).census.move(event.getEntity().getId(),
                     event.getNewPos().chunk().toLong());
@@ -101,41 +136,90 @@ public final class WeftServices implements AutoCloseable {
 
     /** Wired to {@code LevelTickEvent.Post} on the game bus. */
     public void onLevelTickPost(LevelTickEvent.Post event) {
-        if (!WeftConfig.SPAWN_SERVICE_SHADOW || !(event.getLevel() instanceof ServerLevel level)) {
+        if (!SpawnDensityHooks.moduleActive() || !(event.getLevel() instanceof ServerLevel level)) {
             return;
         }
         LevelServices services = servicesOf(level);
+        Set<EntityType<?>> chargedTypes = chargedTypesOf(services, level);
 
         // --- capture (server thread; mirrors createState exactly) ---
         // Skip rules cross-checked against the decompiled 1.21.1 source:
         // persistence-exempt mobs are skipped, classification comes from the
         // NeoForge extension getClassification(true) (mods may override how
-        // they count toward caps), and an entity only counts if its chunk
-        // resolves as a full chunk (the ChunkGetter.query gate).
+        // they count toward caps), chunk keys derive from blockPosition()
+        // (vanilla's ChunkPos.asLong(blockpos), NOT the section-tracked
+        // chunkPosition()), an entity only counts if its chunk passes
+        // vanilla's own ChunkGetter gate (getFullChunk: visible holder +
+        // completed full-chunk future — getChunkNow's status-only gate
+        // over-counts, caught by the graduation gametest), and types with a
+        // biome MobSpawnCost contribute a point charge at their block
+        // position (getRoughBiome = the chunk's quart-pos noise biome).
+        // Attributed to the profiler so /weft report shows the authoritative
+        // mode's real residual on-thread cost next to the vanilla scan cost
+        // it replaces.
         long t0 = System.nanoTime();
+        WeftProfiler.get().push();
         int[] ids = new int[256];
         int[] categories = new int[256];
         long[] chunkKeys = new long[256];
+        boolean[] mobs = new boolean[256];
         int size = 0;
+        long[] chargePositions = new long[16];
+        double[] charges = new double[16];
+        int chargeCount = 0;
+        ServerChunkCacheAccessor chunkGate = level.getChunkSource() instanceof ServerChunkCacheAccessor a
+                ? a : null; // null only if the fail-soft accessor mixin did not apply
+        LevelChunk[] queried = new LevelChunk[1];
+        java.util.function.Consumer<LevelChunk> sink = c -> queried[0] = c;
         for (Entity entity : level.getAllEntities()) {
             MobCategory category = capCategoryOf(entity);
             if (category == null) {
                 continue;
             }
-            var chunkPos = entity.chunkPosition();
-            if (!level.hasChunk(chunkPos.x, chunkPos.z)) {
+            BlockPos pos = entity.blockPosition();
+            long chunkKey = ChunkPos.asLong(pos);
+            LevelChunk chunk;
+            if (chunkGate != null) {
+                queried[0] = null;
+                chunkGate.weft$invokeGetFullChunk(chunkKey, sink);
+                chunk = queried[0];
+            } else {
+                // Approximate gate for SHADOW mode without the mixin;
+                // AUTHORITATIVE requires the mixin (R2) and never gets here.
+                chunk = level.getChunkSource().getChunkNow(
+                        ChunkPos.getX(chunkKey), ChunkPos.getZ(chunkKey));
+            }
+            if (chunk == null) {
                 continue;
             }
             if (size == categories.length) {
                 ids = java.util.Arrays.copyOf(ids, size * 2);
                 categories = java.util.Arrays.copyOf(categories, size * 2);
                 chunkKeys = java.util.Arrays.copyOf(chunkKeys, size * 2);
+                mobs = java.util.Arrays.copyOf(mobs, size * 2);
             }
             ids[size] = entity.getId();
             categories[size] = category.ordinal();
-            chunkKeys[size] = chunkPos.toLong();
+            chunkKeys[size] = chunkKey;
+            mobs[size] = entity instanceof Mob;
             size++;
+            if (!chargedTypes.isEmpty() && chargedTypes.contains(entity.getType())) {
+                MobSpawnSettings.MobSpawnCost cost = chunk
+                        .getNoiseBiome(QuartPos.fromBlock(pos.getX()), QuartPos.fromBlock(pos.getY()),
+                                QuartPos.fromBlock(pos.getZ()))
+                        .value().getMobSettings().getMobSpawnCost(entity.getType());
+                if (cost != null) {
+                    if (chargeCount == charges.length) {
+                        chargePositions = java.util.Arrays.copyOf(chargePositions, chargeCount * 2);
+                        charges = java.util.Arrays.copyOf(charges, chargeCount * 2);
+                    }
+                    chargePositions[chargeCount] = pos.asLong();
+                    charges[chargeCount] = cost.charge();
+                    chargeCount++;
+                }
+            }
         }
+        WeftProfiler.get().popGlobal("weft:spawn_density/capture");
         services.captureNanosLast.set(System.nanoTime() - t0);
 
         // --- census drift measurement: reconcile against the capture ---
@@ -152,39 +236,153 @@ public final class WeftServices implements AutoCloseable {
             }
         }
 
-        // --- parity check: previous tick's async result vs vanilla's fresh state ---
-        var previous = services.spawnDensity.latest();
-        var vanilla = level.getChunkSource().getLastSpawnState();
-        if (previous.isPresent() && vanilla != null) {
-            services.parityTicks.incrementAndGet();
-            List<String> deltas = new ArrayList<>(0);
-            var vanillaCounts = vanilla.getMobCategoryCounts();
-            for (MobCategory category : MobCategory.values()) {
-                if (category == MobCategory.MISC) {
-                    continue;
-                }
-                int ours = previous.get().result().global(category.ordinal());
-                int theirs = vanillaCounts.getOrDefault(category, 0);
-                if (ours != theirs) {
-                    deltas.add(category.getName() + " " + ours + " vs " + theirs);
-                }
-            }
-            if (!deltas.isEmpty()) {
-                services.parityMismatchTicks.incrementAndGet();
-                services.lastMismatch = String.join(", ", deltas);
+        // --- SHADOW parity: previous tick's async result vs vanilla's fresh
+        // state. Only meaningful while vanilla still computes its own scan;
+        // in AUTHORITATIVE mode the verify ticks own this comparison.
+        if (WeftConfig.SPAWN_DENSITY_MODE == SpawnDensityMode.SHADOW) {
+            var previous = services.spawnDensity.latest();
+            var vanilla = level.getChunkSource().getLastSpawnState();
+            if (previous.isPresent() && vanilla != null) {
+                diffAgainstVanilla(services, previous.get().result(), vanilla.getMobCategoryCounts());
             }
         }
 
         services.spawnDensity.refresh(level.getGameTime(),
-                new SpawnDensityService.Snapshot(CATEGORY_COUNT, categories, chunkKeys, size));
+                new SpawnDensityService.Snapshot(CATEGORY_COUNT, categories, chunkKeys, mobs, size,
+                        chargePositions, charges, chargeCount));
+    }
+
+    /**
+     * AUTHORITATIVE mode (called from the {@code tickChunks} mixin via
+     * {@link SpawnDensityHooks}): hand vanilla a {@code SpawnState} built
+     * from the previous tick's async result. Falls back to vanilla's
+     * synchronous scan whenever the result isn't exactly the previous tick's
+     * (compute still in flight, level just loaded) — never blocks. Every
+     * {@code spawnDensityVerifyIntervalTicks} the vanilla scan runs anyway,
+     * is used for that tick, and our result is diffed against it.
+     */
+    NaturalSpawner.SpawnState createStateAuthoritative(
+            ServerLevel level, int spawnableChunkCount, LocalMobCapCalculator localMobCaps,
+            Supplier<NaturalSpawner.SpawnState> vanillaScan) {
+        LevelServices services = servicesOf(level);
+        long gameTime = level.getGameTime();
+        var published = services.spawnDensity.latest().orElse(null);
+        // Freshness gate: accept only the immediately-previous tick's capture
+        // (the staleness shadow mode proved), and consume each publish at
+        // most once — vanilla mutates the handed-off PotentialCalculator and
+        // count map during spawning (afterSpawn), so a publish is spent the
+        // moment it becomes a SpawnState.
+        if (published == null || gameTime - published.tick() != 1
+                || published.tick() <= services.lastConsumedTick) {
+            services.fallbackTicks.incrementAndGet();
+            return vanillaScan.get();
+        }
+        if (WeftConfig.SPAWN_DENSITY_VERIFY_INTERVAL_TICKS > 0
+                && gameTime % WeftConfig.SPAWN_DENSITY_VERIFY_INTERVAL_TICKS == 0) {
+            NaturalSpawner.SpawnState vanilla = vanillaScan.get();
+            long mismatchesBefore = services.parityMismatchTicks.get();
+            diffAgainstVanilla(services, published.result(), vanilla.getMobCategoryCounts());
+            if (services.parityMismatchTicks.get() != mismatchesBefore) {
+                // Verify mismatches are rare and diagnostic gold - surface
+                // them in the log, not only in /weft services.
+                LOGGER.info("spawn-density verify mismatch, {} tick {}: {}",
+                        services.spawnDensity.serviceId(), gameTime, services.lastMismatch);
+            }
+            return vanilla;
+        }
+        try {
+            long t0 = System.nanoTime();
+            WeftProfiler.get().push();
+            SpawnDensityService.Densities densities = published.result();
+            services.lastConsumedTick = published.tick();
+            Object2IntOpenHashMap<MobCategory> counts = new Object2IntOpenHashMap<>();
+            for (MobCategory category : CATEGORIES) {
+                int n = densities.global(category.ordinal());
+                if (n > 0) {
+                    counts.put(category, n);
+                }
+            }
+            // Replay per-chunk Mob counts into vanilla's fresh local-cap
+            // calculator; per-player attribution stays vanilla's own (lazy
+            // player-range lookup, cached per chunk inside addMob).
+            for (Map.Entry<Long, int[]> entry : densities.perChunkMobs().entrySet()) {
+                ChunkPos chunkPos = new ChunkPos(entry.getKey());
+                int[] chunkCounts = entry.getValue();
+                for (int ordinal = 0; ordinal < chunkCounts.length; ordinal++) {
+                    for (int i = 0; i < chunkCounts[ordinal]; i++) {
+                        localMobCaps.addMob(chunkPos, CATEGORIES[ordinal]);
+                    }
+                }
+            }
+            NaturalSpawner.SpawnState state = SpawnStateInvoker.weft$newSpawnState(
+                    spawnableChunkCount, counts, densities.potential(), localMobCaps);
+            WeftProfiler.get().popGlobal("weft:spawn_density/build_state");
+            services.buildNanosLast.set(System.nanoTime() - t0);
+            services.buildFailStreak.set(0);
+            services.authoritativeTicks.incrementAndGet();
+            return state;
+        } catch (Throwable t) {
+            WeftProfiler.get().popGlobal("weft:spawn_density/build_state");
+            SpawnDensityHooks.onBuildFailure(services.buildFailStreak.incrementAndGet(), t);
+            services.fallbackTicks.incrementAndGet();
+            return vanillaScan.get();
+        }
+    }
+
+    /** Shared parity comparison (shadow every tick, authoritative on verify ticks). */
+    private static void diffAgainstVanilla(LevelServices services,
+                                           SpawnDensityService.Densities ours,
+                                           Object2IntMap<MobCategory> vanillaCounts) {
+        services.parityTicks.incrementAndGet();
+        List<String> deltas = new ArrayList<>(0);
+        for (MobCategory category : CATEGORIES) {
+            if (category == MobCategory.MISC) {
+                continue;
+            }
+            int mine = ours.global(category.ordinal());
+            int theirs = vanillaCounts.getOrDefault(category, 0);
+            if (mine != theirs) {
+                deltas.add(category.getName() + " " + mine + " vs " + theirs);
+            }
+        }
+        if (!deltas.isEmpty()) {
+            services.parityMismatchTicks.incrementAndGet();
+            services.lastMismatch = String.join(", ", deltas);
+        }
+    }
+
+    /** Types with a MobSpawnCost anywhere in this level's biome registry (computed once). */
+    private static Set<EntityType<?>> chargedTypesOf(LevelServices services, ServerLevel level) {
+        Set<EntityType<?>> types = services.chargedTypes;
+        if (types == null) {
+            Set<EntityType<?>> collected = new HashSet<>();
+            level.registryAccess().registryOrThrow(Registries.BIOME)
+                    .forEach(biome -> collected.addAll(biome.getMobSettings().getEntityTypes()));
+            services.chargedTypes = types = Set.copyOf(collected);
+        }
+        return types;
+    }
+
+    /** One level's spawn-density counters (gametest assertions + observability). */
+    public record SpawnStats(long authoritativeTicks, long fallbackTicks, long parityTicks,
+                             long parityMismatchTicks, long serviceFailures, boolean latchedOff,
+                             String lastMismatch) {}
+
+    public SpawnStats spawnStats(ServerLevel level) {
+        LevelServices s = servicesOf(level);
+        return new SpawnStats(s.authoritativeTicks.get(), s.fallbackTicks.get(),
+                s.parityTicks.get(), s.parityMismatchTicks.get(),
+                s.spawnDensity.failureCount(), SpawnDensityHooks.isLatchedOff(),
+                s.lastMismatch);
     }
 
     /** Human-readable status lines for {@code /weft services}. */
     public List<String> statusLines() {
+        SpawnDensityMode mode = WeftConfig.SPAWN_DENSITY_MODE;
         if (byLevel.isEmpty()) {
-            return List.of(WeftConfig.SPAWN_SERVICE_SHADOW
+            return List.of(SpawnDensityHooks.moduleActive()
                     ? "No service data yet - let the server tick."
-                    : "Spawn-density shadow service is disabled (spawnServiceShadow=false).");
+                    : "Spawn-density service is inactive (mode " + mode + ", see /weft status).");
         }
         List<String> lines = new ArrayList<>();
         byLevel.forEach((levelId, s) -> {
@@ -192,15 +390,33 @@ public final class WeftServices implements AutoCloseable {
                     .map(p -> String.format("%.0f", p.computeNanos() / 1e3)).orElse("-");
             long ticks = s.parityTicks.get();
             long mismatches = s.parityMismatchTicks.get();
-            lines.add(String.format(
-                    "%s [shadow]: capture %.0f us, compute %s us, parity %d/%d ticks clean (%.2f%%)%s, failures %d",
-                    s.spawnDensity.serviceId(),
-                    s.captureNanosLast.get() / 1e3,
-                    computeUs,
+            String parity = String.format("parity %d/%d ticks clean (%.2f%%)%s",
                     ticks - mismatches, ticks,
                     ticks == 0 ? 100.0 : 100.0 * (ticks - mismatches) / ticks,
-                    mismatches == 0 ? "" : " last: " + s.lastMismatch,
-                    s.spawnDensity.failureCount()));
+                    mismatches == 0 ? "" : " last: " + s.lastMismatch);
+            if (mode == SpawnDensityMode.AUTHORITATIVE) {
+                long used = s.authoritativeTicks.get();
+                long fellBack = s.fallbackTicks.get();
+                lines.add(String.format(
+                        "%s [authoritative%s]: %d ticks served async, %d fell back to vanilla, "
+                                + "capture %.0f us, compute %s us, build %.0f us, verify %s, failures %d",
+                        s.spawnDensity.serviceId(),
+                        SpawnDensityHooks.isLatchedOff() ? ", LATCHED OFF" : "",
+                        used, fellBack,
+                        s.captureNanosLast.get() / 1e3,
+                        computeUs,
+                        s.buildNanosLast.get() / 1e3,
+                        parity,
+                        s.spawnDensity.failureCount()));
+            } else {
+                lines.add(String.format(
+                        "%s [shadow]: capture %.0f us, compute %s us, %s, failures %d",
+                        s.spawnDensity.serviceId(),
+                        s.captureNanosLast.get() / 1e3,
+                        computeUs,
+                        parity,
+                        s.spawnDensity.failureCount()));
+            }
             lines.add(String.format(
                     "  census: %d tracked, drift %d over %d reconciles%s",
                     s.census.trackedCount(),

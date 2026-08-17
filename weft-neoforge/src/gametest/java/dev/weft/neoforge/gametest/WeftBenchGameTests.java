@@ -206,8 +206,11 @@ public class WeftBenchGameTests {
      * routed off-thread — this flat world's paths are short and cheap, so
      * there is little synchronous A* cost to remove, and the earlier
      * "-18.3% WS-2 alone" cross-run reading was mostly run-to-run variance.
-     * WS-2's value case is pathfinding-stressed worlds (obstructed terrain,
-     * hordes); this trend line keeps it honest either way.
+     * WS-2's value case is pathfinding-stressed worlds — proven by
+     * {@link #ws2PathStressReduction} (2026-08-17: ~50-59% entity-phase
+     * reduction on the 300-zombie maze), which is what flipped
+     * {@code asyncPathfinding} default-on. This flat trend line stays as the
+     * "does async cost anything when paths are cheap" watchdog (~0%).
      */
     @GameTest(template = "empty", batch = "ws2measure", timeoutTicks = 1200, required = false)
     public void ws2EntityPhaseReduction(GameTestHelper helper) {
@@ -257,6 +260,190 @@ public class WeftBenchGameTests {
                 helper.fail("WS-2 never engaged: zero path requests routed off-thread - "
                         + "is the optimizations mixin applied? hooksApplied="
                         + PathfindingHooks.hooksApplied());
+            }
+            helper.succeed();
+        });
+    }
+
+    /**
+     * WS-2 acceptance (RFC-0002): the 300-zombie stress world. A sealed
+     * inner keep makes the bot A*-unreachable from outside, so every horde
+     * repath runs vanilla's search to its visited-node budget — the
+     * pathfinding-bound workload WS-2 exists for, which the flat-field
+     * {@link #ws2EntityPhaseReduction} demonstrably is not. Same-run A/B
+     * with a horde position reset at the phase boundary so both phases
+     * start from the identical layout. The acceptance call ("measurable
+     * main-thread reduction on a 300-zombie stress world") is made from the
+     * recorded number; the test itself only hard-fails on a vacuous run.
+     */
+    @GameTest(template = "empty", batch = "ws2stress", timeoutTicks = 1600, required = false)
+    public void ws2PathStressReduction(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        BlockPos origin = groundOrigin(helper);
+        BenchmarkWorld.configure(level);
+        forceChunks(level, origin, true);
+        java.util.List<BlockPos> maze = BenchmarkWorld.buildMaze(level, origin);
+        java.util.List<Mob> horde = BenchmarkWorld.spawnZombieHorde(level, origin, 300);
+        java.util.List<net.minecraft.world.phys.Vec3> starts =
+                horde.stream().map(net.minecraft.world.entity.Entity::position).toList();
+        LoadBot bot = LoadBot.join(level, origin, "WeftWs2StressBot");
+
+        WeftConfig.PROFILING_ENABLED = true;
+        WeftConfig.PROFILE_WINDOW_TICKS = PHASE_TICKS + 64;
+        PathfindingHooks.setActive(false);
+
+        long[] phaseStartTick = new long[1];
+        EntityPhase[] baseline = new EntityPhase[1];
+        long[] submittedAtActivation = new long[1];
+        int[] tick = new int[1];
+
+        helper.onEachTick(() -> {
+            bot.tickCircle(6.0);
+            // Retarget insurance every 20 ticks: an unreachable target is
+            // never dropped for range reasons, but a lost line-of-sight
+            // acquisition must not idle half the horde.
+            if (tick[0]++ % 20 == 0) {
+                for (Mob zombie : horde) {
+                    if (!zombie.isRemoved() && zombie.getTarget() == null) {
+                        zombie.setTarget(bot.player());
+                    }
+                }
+            }
+        });
+
+        // Phase A: synchronous vanilla pathfinding.
+        helper.runAfterDelay(WARMUP_TICKS,
+                () -> phaseStartTick[0] = WeftProfiler.get().tickCounter());
+
+        // Phase B: async on, horde reset to the identical starting layout.
+        helper.runAfterDelay(WARMUP_TICKS + PHASE_TICKS, () -> {
+            baseline[0] = entityPhaseMsPerTick(helper, phaseStartTick[0]);
+            for (int i = 0; i < horde.size(); i++) {
+                Mob zombie = horde.get(i);
+                if (!zombie.isRemoved()) {
+                    var start = starts.get(i);
+                    zombie.teleportTo(start.x, start.y, start.z);
+                    zombie.getNavigation().stop();
+                    zombie.setTarget(bot.player());
+                }
+            }
+            PathfindingHooks.setActive(true);
+            submittedAtActivation[0] = PathfindingHooks.submittedCount();
+            phaseStartTick[0] = WeftProfiler.get().tickCounter();
+        });
+
+        helper.runAfterDelay(WARMUP_TICKS + 2 * PHASE_TICKS, () -> {
+            EntityPhase activated = entityPhaseMsPerTick(helper, phaseStartTick[0]);
+            long requests = PathfindingHooks.submittedCount() - submittedAtActivation[0];
+            WeftConfig.PROFILE_WINDOW_TICKS = 100;
+            PathfindingHooks.setActive(false);
+            horde.forEach(net.minecraft.world.entity.Entity::discard);
+            bot.leave();
+            BenchmarkWorld.clearMaze(level, maze);
+            forceChunks(level, origin, false);
+
+            double reduction = 100.0 * (1.0 - activated.totalMs() / baseline[0].totalMs());
+            BenchRecorder.record(level.getServer(),
+                    "ws2_stress_entity_phase_sync_pathfinding", "ms/tick", baseline[0].totalMs(),
+                    "300-zombie maze horde, async pathfinding OFF (baseline)");
+            BenchRecorder.record(level.getServer(),
+                    "ws2_stress_entity_phase_async_pathfinding", "ms/tick", activated.totalMs(),
+                    String.format(Locale.ROOT,
+                            "%.1f%% entity-phase reduction on the WS-2 acceptance world "
+                                    + "(300 zombies, sealed-keep maze, every repath runs to "
+                                    + "the A* node budget); %d requests routed off-thread, "
+                                    + "%d measured ticks/phase",
+                            reduction, requests, PHASE_TICKS));
+
+            if (requests == 0) {
+                helper.fail("WS-2 stress never engaged: zero path requests routed off-thread - "
+                        + "is the optimizations mixin applied? hooksApplied="
+                        + PathfindingHooks.hooksApplied());
+            }
+            helper.succeed();
+        });
+    }
+
+    /**
+     * The P1 exit criterion (RFC-0001 §11: "measurable TPS win on stock
+     * packs"): end-to-end MSPT, not a phase slice — the same full-tick
+     * number spark or {@code /tps} shows a server admin — over a stock-shaped
+     * world: 2500 cap-countable (non-persistent) passive mobs, no mods, no
+     * Weft modules in phase A; spawn-density AUTHORITATIVE (shipping
+     * default, verify ticks included) plus the shipped {@code
+     * asyncPathfinding} default in phase B. {@code doMobSpawning} stays off
+     * so the population is run-stable; vanilla runs {@code createState}
+     * every tick regardless, which is precisely the cost being taken off
+     * the thread.
+     */
+    @GameTest(template = "empty", batch = "p1exit", timeoutTicks = 1600, required = false)
+    public void p1EndToEndMspt(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        BlockPos origin = groundOrigin(helper);
+        BenchmarkWorld.configure(level);
+        forceChunks(level, origin, true);
+        java.util.List<Mob> population = BenchmarkWorld.spawnCountablePassive(level, origin, 2500);
+        LoadBot bot = LoadBot.join(level, origin, "WeftP1ExitBot");
+
+        WeftConfig.PROFILING_ENABLED = true;
+        WeftConfig.PROFILE_WINDOW_TICKS = PHASE_TICKS + 64;
+        dev.weft.neoforge.service.SpawnDensityHooks.setActive(false);
+        PathfindingHooks.setActive(false);
+
+        long[] phaseStartTick = new long[1];
+        double[] baselineMspt = new double[2];
+        long[] authTicksAtActivation = new long[1];
+
+        helper.onEachTick(() -> bot.tickCircle(BOT_CIRCLE_RADIUS));
+
+        // Phase A: vanilla — every P1 service off.
+        helper.runAfterDelay(WARMUP_TICKS,
+                () -> phaseStartTick[0] = WeftProfiler.get().tickCounter());
+
+        // Phase B: P1 services at their shipping defaults.
+        helper.runAfterDelay(WARMUP_TICKS + PHASE_TICKS, () -> {
+            double[] mspt = msptMsPerTick(helper, phaseStartTick[0]);
+            baselineMspt[0] = mspt[0];
+            baselineMspt[1] = mspt[1];
+            dev.weft.neoforge.service.SpawnDensityHooks.setActive(true);
+            PathfindingHooks.setActive(WeftConfig.ASYNC_PATHFINDING);
+            authTicksAtActivation[0] = dev.weft.neoforge.WeftMod.servicesOrNull()
+                    .spawnStats(level).authoritativeTicks();
+            phaseStartTick[0] = WeftProfiler.get().tickCounter();
+        });
+
+        helper.runAfterDelay(WARMUP_TICKS + 2 * PHASE_TICKS, () -> {
+            double[] servicesMspt = msptMsPerTick(helper, phaseStartTick[0]);
+            var stats = dev.weft.neoforge.WeftMod.servicesOrNull().spawnStats(level);
+            long authTicks = stats.authoritativeTicks() - authTicksAtActivation[0];
+            WeftConfig.PROFILE_WINDOW_TICKS = 100;
+            PathfindingHooks.setActive(false);
+            // Leave the spawn-density module in its config-resolved state
+            // rather than force-off: later batches should see shipping defaults.
+            dev.weft.neoforge.coexist.WeftModules.resolve();
+            population.forEach(net.minecraft.world.entity.Entity::discard);
+            bot.leave();
+            forceChunks(level, origin, false);
+
+            double reduction = 100.0 * (1.0 - servicesMspt[0] / baselineMspt[0]);
+            BenchRecorder.record(level.getServer(),
+                    "p1_end_to_end_mspt_vanilla", "ms/tick", baselineMspt[0],
+                    String.format(Locale.ROOT,
+                            "full-tick MSPT, all P1 services off; p95 %.3f ms; 2500 countable "
+                                    + "passive mobs, %d measured ticks", baselineMspt[1], PHASE_TICKS));
+            BenchRecorder.record(level.getServer(),
+                    "p1_end_to_end_mspt_p1_services", "ms/tick", servicesMspt[0],
+                    String.format(Locale.ROOT,
+                            "%.1f%% full-tick MSPT reduction with P1 services at shipping "
+                                    + "defaults (spawn-density AUTHORITATIVE incl. verify ticks, "
+                                    + "asyncPathfinding=%s); p95 %.3f ms; %d/%d ticks served async",
+                            reduction, WeftConfig.ASYNC_PATHFINDING, servicesMspt[1],
+                            authTicks, PHASE_TICKS));
+
+            if (authTicks == 0) {
+                helper.fail("P1 end-to-end never engaged: zero ticks served by the "
+                        + "authoritative spawn-density service - hooksApplied="
+                        + dev.weft.neoforge.service.SpawnDensityHooks.hooksApplied());
             }
             helper.succeed();
         });
@@ -324,7 +511,7 @@ public class WeftBenchGameTests {
     }
 
     /** Ground-level world position at the center of the (air) test structure. */
-    private static BlockPos groundOrigin(GameTestHelper helper) {
+    static BlockPos groundOrigin(GameTestHelper helper) {
         BlockPos structureCenter = helper.absolutePos(new BlockPos(2, 0, 2));
         int y = helper.getLevel().getHeight(Heightmap.Types.MOTION_BLOCKING,
                 structureCenter.getX(), structureCenter.getZ());
@@ -337,7 +524,7 @@ public class WeftBenchGameTests {
      * regardless of player tickets; loading is completed synchronously so
      * spawning can rely on heightmaps.
      */
-    private static void forceChunks(ServerLevel level, BlockPos origin, boolean forced) {
+    static void forceChunks(ServerLevel level, BlockPos origin, boolean forced) {
         ChunkPos center = new ChunkPos(origin);
         for (int cx = center.x - CHUNK_RADIUS; cx <= center.x + CHUNK_RADIUS; cx++) {
             for (int cz = center.z - CHUNK_RADIUS; cz <= center.z + CHUNK_RADIUS; cz++) {
@@ -384,6 +571,30 @@ public class WeftBenchGameTests {
                 }
             }
         }
+    }
+
+    /**
+     * Full-tick MSPT — {@code [mean, p95]} in ms — over completed ticks after
+     * {@code startTickExclusive}, from the profiler's per-tick wall timing
+     * ({@code TickRecord.tickNanos}): the whole server tick, all levels and
+     * phases, i.e. the number a TPS monitor reports.
+     */
+    private static double[] msptMsPerTick(GameTestHelper helper, long startTickExclusive) {
+        long endInclusive = WeftProfiler.get().tickCounter() - 1;
+        java.util.List<Long> nanos = new java.util.ArrayList<>();
+        for (TickProfiler.TickRecord record : WeftProfiler.get().snapshotWindow()) {
+            if (record.tickNumber() > startTickExclusive && record.tickNumber() <= endInclusive) {
+                nanos.add(record.tickNanos());
+            }
+        }
+        if (nanos.size() < PHASE_TICKS - 16) {
+            helper.fail("Profiler window only covered " + nanos.size() + " of " + PHASE_TICKS
+                    + " phase ticks - is profiling enabled and the window sized to the phase?");
+        }
+        nanos.sort(null);
+        double mean = nanos.stream().mapToLong(Long::longValue).average().orElse(0) / 1e6;
+        double p95 = nanos.get((int) Math.min(nanos.size() - 1, Math.ceil(nanos.size() * 0.95) - 1)) / 1e6;
+        return new double[]{mean, p95};
     }
 
     /** Mean per-tick entity-phase cost and its AI-step slice, in ms. */

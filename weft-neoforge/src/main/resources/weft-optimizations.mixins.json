@@ -6,7 +6,10 @@
   "mixins": [
     "MobAiThrottleMixin",
     "PathNavigationAsyncMixin",
-    "PathRecomputeThrottleMixin"
+    "PathRecomputeThrottleMixin",
+    "ServerChunkCacheAccessor",
+    "ServerChunkCacheSpawnStateMixin",
+    "SpawnStateInvoker"
   ],
   "injectors": {
     "defaultRequire": 0

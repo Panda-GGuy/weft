@@ -4,7 +4,7 @@
 # default to cooperate; Tier-3 mixin-overlap scanning is the backstop.
 # Updating compat for a new mod is a one-line PR here.
 #
-# Current Weft module ids: profiler, spawn_shadow, activation, pathfinding,
+# Current Weft module ids: profiler, spawn_density, activation, pathfinding,
 # entity_sharding.
 # (Any mod that patches entity-tick internals directly is a tick-ownership
 # overlap for entity_sharding: posture "refuse", per RFC-0004 sec. 3. No such
