@@ -24,7 +24,8 @@ the testing playbook live on the
 |---|---|---|
 | `weft-engine` | Scheduler, regions, mailboxes, guards, graph scheduler | **None** (enforced at build) |
 | `weft-api` | Annotations + interfaces mods target (`@WeftSafe`, `RegionScheduler`, graph API) | **None** (enforced) |
-| `weft-sandbox` | Mod tier classification, legacy lane | None (pure parts) |
+| `weft-sandbox` | Mod tier classification, legacy lane, coexistence policy (RFC-0003) | None (pure parts) |
+| `weft-services` | Engine-side services for the RFC-0002 workstreams (WS-1 activation scheduling) | **None** (enforced) |
 | `weft-neoforge` | The actual mod: mixins, event bus adaptation, config | NeoForge 1.21.1 |
 | `weft-adapters` | Per-mod graph adapters (Create, AE2, …) | Planned (P3) |
 
@@ -65,6 +66,26 @@ zero service failures, all parity deltas explained by the by-design one-tick
 staleness, and vanilla's own scan cost is now itemized in `/weft report`
 (`natural_spawner/create_state`) as the measured prize for going
 authoritative later.
+
+**RFC-0002/0003 workstreams started** (2026-08-16): every Weft optimization
+module now walks the [RFC-0003](docs/RFC-0003-coexistence-policy.md)
+coexistence ladder at startup — independent kill switch, known-neighbor
+registry (`weft-neighbors.toml`), user force-enable/disable overrides, and a
+one-glance posture table in the log and `/weft status`. First entries from
+[RFC-0002](docs/RFC-0002-modernization-workstreams.md):
+
+- **WS-8 benchmark-as-CI**: JMH suites over the engine hot paths (mailboxes,
+  region merge/split, pipeline scheduling, graph commit routing, the WS-1
+  decision) run nightly; the `bench` workflow records results on the
+  `bench-data` branch and fails on regression beyond the noise band.
+  Run locally: `./gradlew :weft-engine:jmh :weft-services:jmh`.
+- **WS-1 entity activation scheduling**: mobs far from every player tick
+  their sensing and goal/target selectors at reduced frequency (32/64-block
+  tiers, 1/4 and 1/20 rates by default) while movement, navigation, brains,
+  and despawn accounting stay per-tick. Fail-soft mixin (self-disables if it
+  cannot apply), per-type overrides and exemptions in config. **Ships off**
+  (`activationScheduling = false`) until the WS-8 acceptance benchmark
+  (2k passive + 500 hostile, >=30% entity-phase reduction) proves it.
 
 ## Trying the P0 profiler locally
 

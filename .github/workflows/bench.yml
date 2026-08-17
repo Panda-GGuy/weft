@@ -1,0 +1,47 @@
+name: bench
+
+# WS-8 (RFC-0002): nightly JMH run over the engine hot paths. Results are
+# recorded on the bench-data branch; the job FAILS when any benchmark
+# regresses beyond the noise band vs the last recorded run. Shared runners
+# are noisy, hence the generous 150% threshold - this gate catches real
+# regressions (an accidental O(n^2), a new allocation storm), not 5% drift.
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  jmh:
+    name: "JMH regression gate"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Run JMH suites
+        run: gradle :weft-engine:jmh :weft-services:jmh --console=plain
+      - name: Merge module results
+        run: |
+          jq -s 'add' \
+            weft-engine/build/reports/jmh/results.json \
+            weft-services/build/reports/jmh/results.json \
+            > jmh-results.json
+      - name: Compare against recorded baseline
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: Weft JMH
+          tool: 'jmh'
+          output-file-path: jmh-results.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          gh-pages-branch: bench-data
+          benchmark-data-dir-path: dev/bench
+          auto-push: true
+          fail-on-alert: true
+          alert-threshold: '150%'
+          summary-always: true

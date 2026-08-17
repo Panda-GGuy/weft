@@ -3,7 +3,10 @@ package dev.weft.neoforge;
 import net.neoforged.fml.event.config.ModConfigEvent;
 import net.neoforged.neoforge.common.ModConfigSpec;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * Weft tunables (RFC §4.2), backed by NeoForge's config system
@@ -62,6 +65,59 @@ public final class WeftConfig {
             .defineListAllowEmpty("speedupWorkerCounts", List.of(2, 4, 8, 16),
                     () -> 4, o -> o instanceof Integer i && i >= 1 && i <= 1024);
 
+    // --- WS-1: entity activation scheduling (RFC-0002; kill switch per RFC-0003 R1) ---
+
+    private static final ModConfigSpec.BooleanValue ACTIVATION_SCHEDULING_SPEC = BUILDER
+            .comment("WS-1 (RFC-0002): tick distant mobs' expensive AI (sensing, goal and",
+                    "target selectors) at reduced frequency. Movement, physics, navigation",
+                    "and brain ticking stay per-tick. Independent kill switch (RFC-0003 R1);",
+                    "ships off until the WS-8 benchmarks prove the acceptance criteria.")
+            .define("activationScheduling", false);
+
+    private static final ModConfigSpec.IntValue ACTIVATION_FULL_RATE_DISTANCE_SPEC = BUILDER
+            .comment("Blocks from the nearest player within which AI always runs every tick.")
+            .defineInRange("activationFullRateDistance", 32, 0, 1024);
+
+    private static final ModConfigSpec.IntValue ACTIVATION_REDUCED_DISTANCE_SPEC = BUILDER
+            .comment("Blocks within which AI runs every activationReducedInterval ticks;",
+                    "beyond it, every activationFarInterval ticks.")
+            .defineInRange("activationReducedDistance", 64, 0, 1024);
+
+    private static final ModConfigSpec.IntValue ACTIVATION_REDUCED_INTERVAL_SPEC = BUILDER
+            .defineInRange("activationReducedInterval", 4, 1, 200);
+
+    private static final ModConfigSpec.IntValue ACTIVATION_FAR_INTERVAL_SPEC = BUILDER
+            .defineInRange("activationFarInterval", 20, 1, 200);
+
+    private static final ModConfigSpec.ConfigValue<List<? extends String>> ACTIVATION_EXEMPT_TYPES_SPEC = BUILDER
+            .comment("Entity types never throttled, in addition to the built-in exemptions",
+                    "(raiders and anything with a live attack target).")
+            .defineListAllowEmpty("activationExemptTypes",
+                    List.of("minecraft:ender_dragon", "minecraft:wither",
+                            "minecraft:warden", "minecraft:elder_guardian"),
+                    () -> "modid:entity_type", o -> o instanceof String s && !s.isBlank());
+
+    private static final ModConfigSpec.ConfigValue<List<? extends String>> ACTIVATION_TYPE_OVERRIDES_SPEC = BUILDER
+            .comment("Per-type interval overrides, entries like \"modid:entity_type=8\".",
+                    "1 opts the type out of throttling; larger values replace the tier",
+                    "interval whenever the type is outside the full-rate ring.")
+            .defineListAllowEmpty("activationTypeOverrides", List.of(),
+                    () -> "modid:entity_type=8",
+                    o -> o instanceof String s && parseOverride(s) != null);
+
+    // --- RFC-0003 R4: user overrides of the coexistence ladder, both directions ---
+
+    private static final ModConfigSpec.ConfigValue<List<? extends String>> FORCE_ENABLE_MODULES_SPEC = BUILDER
+            .comment("Weft module ids to force-enable over a yield (RFC-0003 R4), e.g.",
+                    "\"activation\". Logged as user-chosen. Module ids: /weft status.")
+            .defineListAllowEmpty("forceEnableModules", List.of(),
+                    () -> "module_id", o -> o instanceof String s && !s.isBlank());
+
+    private static final ModConfigSpec.ConfigValue<List<? extends String>> FORCE_DISABLE_MODULES_SPEC = BUILDER
+            .comment("Weft module ids to force-disable (RFC-0003 R4).")
+            .defineListAllowEmpty("forceDisableModules", List.of(),
+                    () -> "module_id", o -> o instanceof String s && !s.isBlank());
+
     public static final ModConfigSpec SPEC = BUILDER.build();
 
     // --- cached values (defaults mirror the spec; refreshed on config events) ---
@@ -75,6 +131,31 @@ public final class WeftConfig {
     public static volatile boolean SPAWN_SERVICE_SHADOW = true;
     public static volatile int CENSUS_RECONCILE_INTERVAL_TICKS = 200;
     public static volatile int[] SPEEDUP_WORKER_COUNTS = {2, 4, 8, 16};
+    public static volatile boolean ACTIVATION_SCHEDULING = false;
+    public static volatile int ACTIVATION_FULL_RATE_DISTANCE = 32;
+    public static volatile int ACTIVATION_REDUCED_DISTANCE = 64;
+    public static volatile int ACTIVATION_REDUCED_INTERVAL = 4;
+    public static volatile int ACTIVATION_FAR_INTERVAL = 20;
+    public static volatile Set<String> ACTIVATION_EXEMPT_TYPES = Set.of(
+            "minecraft:ender_dragon", "minecraft:wither",
+            "minecraft:warden", "minecraft:elder_guardian");
+    public static volatile Map<String, Integer> ACTIVATION_TYPE_OVERRIDES = Map.of();
+    public static volatile Set<String> FORCE_ENABLE_MODULES = Set.of();
+    public static volatile Set<String> FORCE_DISABLE_MODULES = Set.of();
+
+    /** {@code "type=interval"} entry parser; null when malformed (also the spec validator). */
+    static Map.Entry<String, Integer> parseOverride(String entry) {
+        int eq = entry.indexOf('=');
+        if (eq <= 0 || eq == entry.length() - 1) {
+            return null;
+        }
+        try {
+            int interval = Integer.parseInt(entry.substring(eq + 1).trim());
+            return interval >= 1 ? Map.entry(entry.substring(0, eq).trim(), interval) : null;
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
 
     /** Wired to the mod event bus in {@link WeftMod}. */
     static void onConfigEvent(ModConfigEvent event) {
@@ -91,5 +172,21 @@ public final class WeftConfig {
         CENSUS_RECONCILE_INTERVAL_TICKS = CENSUS_RECONCILE_INTERVAL_TICKS_SPEC.get();
         SPEEDUP_WORKER_COUNTS = SPEEDUP_WORKER_COUNTS_SPEC.get().stream()
                 .mapToInt(Integer::intValue).toArray();
+        ACTIVATION_SCHEDULING = ACTIVATION_SCHEDULING_SPEC.get();
+        ACTIVATION_FULL_RATE_DISTANCE = ACTIVATION_FULL_RATE_DISTANCE_SPEC.get();
+        ACTIVATION_REDUCED_DISTANCE = ACTIVATION_REDUCED_DISTANCE_SPEC.get();
+        ACTIVATION_REDUCED_INTERVAL = ACTIVATION_REDUCED_INTERVAL_SPEC.get();
+        ACTIVATION_FAR_INTERVAL = ACTIVATION_FAR_INTERVAL_SPEC.get();
+        ACTIVATION_EXEMPT_TYPES = Set.copyOf(ACTIVATION_EXEMPT_TYPES_SPEC.get());
+        Map<String, Integer> overrides = new HashMap<>();
+        for (String entry : ACTIVATION_TYPE_OVERRIDES_SPEC.get()) {
+            Map.Entry<String, Integer> parsed = parseOverride(entry);
+            if (parsed != null) { // validator already rejected malformed entries
+                overrides.put(parsed.getKey(), parsed.getValue());
+            }
+        }
+        ACTIVATION_TYPE_OVERRIDES = Map.copyOf(overrides);
+        FORCE_ENABLE_MODULES = Set.copyOf(FORCE_ENABLE_MODULES_SPEC.get());
+        FORCE_DISABLE_MODULES = Set.copyOf(FORCE_DISABLE_MODULES_SPEC.get());
     }
 }

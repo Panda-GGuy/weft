@@ -1,0 +1,23 @@
+# Known-neighbor registry (RFC-0003 R3). Data, not code: each table is a
+# neighbor modid, each entry maps a Weft module id to the default posture
+# toward that neighbor ("cooperate" | "yield" | "refuse"). Unknown mods
+# default to cooperate; Tier-3 mixin-overlap scanning is the backstop.
+# Updating compat for a new mod is a one-line PR here.
+#
+# Current Weft module ids: profiler, spawn_shadow, activation.
+# (Entries for modules that do not exist yet are seed data - harmless until
+# the module registers itself under that id.)
+
+[spark]
+# Two observers compose (ladder rung 1) - spark profiles alongside Weft's P0.
+profiler = "cooperate"
+
+[lithium]
+# Lithium optimizes AI internals (cheaper goals/pathfinding); WS-1 changes AI
+# *frequency*. Different levers on the same subsystem - they compose. Flip to
+# "yield" if a colliding mixin territory ever appears (R7 CI matrix catches it).
+activation = "cooperate"
+
+[alternate_current]
+# Seed for WS-3 redstone compilation (RFC-0002): their implementation runs.
+ws3_redstone = "yield"

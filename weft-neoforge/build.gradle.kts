@@ -9,6 +9,7 @@ plugins {
 evaluationDependsOn(":weft-engine")
 evaluationDependsOn(":weft-api")
 evaluationDependsOn(":weft-sandbox")
+evaluationDependsOn(":weft-services")
 
 fun mainSourceSetOf(path: String): SourceSet =
     project(path).extensions.getByType<SourceSetContainer>().getByName("main")
@@ -35,6 +36,7 @@ neoForge {
             sourceSet(mainSourceSetOf(":weft-engine"))
             sourceSet(mainSourceSetOf(":weft-api"))
             sourceSet(mainSourceSetOf(":weft-sandbox"))
+            sourceSet(mainSourceSetOf(":weft-services"))
         }
     }
 }
@@ -51,9 +53,11 @@ dependencies {
     implementation(project(":weft-engine"))
     implementation(project(":weft-api"))
     implementation(project(":weft-sandbox"))
+    implementation(project(":weft-services"))
     bundled(project(":weft-engine"))
     bundled(project(":weft-api"))
     bundled(project(":weft-sandbox"))
+    bundled(project(":weft-services"))
 }
 
 tasks.jar {

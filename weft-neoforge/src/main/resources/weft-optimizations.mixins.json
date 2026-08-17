@@ -1,0 +1,12 @@
+{
+  "required": false,
+  "package": "dev.weft.neoforge.mixin.optimization",
+  "compatibilityLevel": "JAVA_21",
+  "minVersion": "0.8.5",
+  "mixins": [
+    "MobAiThrottleMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 0
+  }
+}

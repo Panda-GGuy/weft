@@ -31,3 +31,8 @@ side = "BOTH"
 
 [[mixins]]
 config = "weft.mixins.json"
+
+# Optimization hooks are fail-soft (RFC-0003 R2): required=false +
+# defaultRequire=0, with runtime applied-checks that self-disable the module.
+[[mixins]]
+config = "weft-optimizations.mixins.json"

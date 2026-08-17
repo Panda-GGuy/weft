@@ -32,8 +32,43 @@ subprojects {
         options.encoding = "UTF-8"
     }
 
-    // RFC §3 dependency rule: engine and api must never touch Minecraft.
-    if (name == "weft-engine" || name == "weft-api") {
+    // WS-8 (RFC-0002): JMH microbenchmark source set for engine-side modules.
+    // Results land in build/reports/jmh/results.json; the nightly bench
+    // workflow (.github/workflows/bench.yml) merges them and fails on
+    // regression beyond the noise band.
+    if (name == "weft-engine" || name == "weft-services") {
+        val sourceSetContainer = extensions.getByType<SourceSetContainer>()
+        val jmhSet = sourceSetContainer.create("jmh")
+        dependencies {
+            "jmhImplementation"(sourceSetContainer["main"].output)
+            "jmhImplementation"("org.openjdk.jmh:jmh-core:1.37")
+            "jmhAnnotationProcessor"("org.openjdk.jmh:jmh-generator-annprocess:1.37")
+        }
+        configurations["jmhImplementation"].extendsFrom(
+                configurations["implementation"], configurations["api"])
+
+        // Benchmarks compile on every PR (only the nightly job runs them;
+        // this keeps them from bit-rotting in between).
+        tasks.named("check") { dependsOn(tasks.named("compileJmhJava")) }
+
+        tasks.register<JavaExec>("jmh") {
+            group = "verification"
+            description = "Run JMH benchmarks; JSON results to build/reports/jmh/results.json."
+            classpath = jmhSet.runtimeClasspath
+            mainClass.set("org.openjdk.jmh.Main")
+            val resultFile = layout.buildDirectory.file("reports/jmh/results.json")
+            outputs.file(resultFile)
+            doFirst { resultFile.get().asFile.parentFile.mkdirs() }
+            args("-rf", "json", "-rff", resultFile.get().asFile.absolutePath)
+            // JavaExec doesn't inherit the project toolchain; pin the launcher
+            // like :weft-engine:benchmark does (Gradle itself may run on 17).
+            javaLauncher.set((project.extensions.getByName("javaToolchains") as JavaToolchainService)
+                    .launcherFor { languageVersion.set(JavaLanguageVersion.of(21)) })
+        }
+    }
+
+    // RFC §3 dependency rule: engine, api, and services must never touch Minecraft.
+    if (name == "weft-engine" || name == "weft-api" || name == "weft-services") {
         tasks.register("verifyNoMinecraftImports") {
             val srcDir = layout.projectDirectory.dir("src/main/java")
             inputs.dir(srcDir).withPropertyName("sources").optional()

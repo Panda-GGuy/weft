@@ -16,6 +16,7 @@ rootProject.name = "weft"
 include("weft-engine")
 include("weft-api")
 include("weft-sandbox")
+include("weft-services")
 
 // The NeoForge mod module needs maven.neoforged.net + Minecraft artifacts.
 // Enable it explicitly once you're on a normal dev machine:

@@ -28,6 +28,7 @@ public final class WeftCommands {
                         .requires(source -> source.hasPermission(2))
                         .executes(ctx -> usage(ctx.getSource()))
                         .then(Commands.literal("report").executes(ctx -> report(ctx.getSource())))
+                        .then(Commands.literal("status").executes(ctx -> status(ctx.getSource())))
                         .then(Commands.literal("services").executes(ctx -> services(ctx.getSource())))
                         .then(Commands.literal("profile")
                                 .executes(ctx -> profileStatus(ctx.getSource()))
@@ -38,7 +39,16 @@ public final class WeftCommands {
     private static int usage(CommandSourceStack source) {
         source.sendSuccess(() -> Component.literal(
                 "/weft report - regionizability report | /weft profile [on|off] - toggle profiling"
-                        + " | /weft services - P1 service status"), false);
+                        + " | /weft services - P1 service status"
+                        + " | /weft status - module posture (RFC-0003)"), false);
+        return Command.SINGLE_SUCCESS;
+    }
+
+    /** RFC-0003 R5: the same one-glance posture table the startup log prints. */
+    private static int status(CommandSourceStack source) {
+        for (String line : dev.weft.neoforge.coexist.WeftModules.resolve()) {
+            source.sendSuccess(() -> Component.literal(line), false);
+        }
         return Command.SINGLE_SUCCESS;
     }
 

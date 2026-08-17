@@ -4,6 +4,7 @@ import com.mojang.logging.LogUtils;
 import dev.weft.engine.graph.GraphScheduler;
 import dev.weft.engine.region.RegionManager;
 import dev.weft.engine.sched.WeftScheduler;
+import dev.weft.neoforge.coexist.WeftModules;
 import dev.weft.neoforge.profiler.WeftProfiler;
 import dev.weft.neoforge.service.WeftServices;
 import net.neoforged.bus.api.IEventBus;
@@ -35,8 +36,14 @@ public final class WeftMod {
 
     public WeftMod(IEventBus modBus, ModContainer container) {
         container.registerConfig(ModConfig.Type.COMMON, WeftConfig.SPEC);
-        modBus.addListener((ModConfigEvent.Loading e) -> WeftConfig.onConfigEvent(e));
-        modBus.addListener((ModConfigEvent.Reloading e) -> WeftConfig.onConfigEvent(e));
+        modBus.addListener((ModConfigEvent.Loading e) -> {
+            WeftConfig.onConfigEvent(e);
+            WeftModules.onConfigReload();
+        });
+        modBus.addListener((ModConfigEvent.Reloading e) -> {
+            WeftConfig.onConfigEvent(e);
+            WeftModules.onConfigReload();
+        });
         NeoForge.EVENT_BUS.addListener(this::onServerAboutToStart);
         NeoForge.EVENT_BUS.addListener(this::onServerStopping);
         NeoForge.EVENT_BUS.addListener((RegisterCommandsEvent e) -> WeftCommands.register(e));
@@ -69,6 +76,9 @@ public final class WeftMod {
     }
 
     private void onServerAboutToStart(ServerAboutToStartEvent event) {
+        // RFC-0003 R5: resolve every module down the coexistence ladder and
+        // log the one-glance posture table before anything starts working.
+        WeftModules.resolveAndLog();
         long seed = event.getServer().getWorldData().worldGenOptions().seed();
         services = new WeftServices();
         regions = new RegionManager(WeftConfig.MERGE_DISTANCE, seed);
