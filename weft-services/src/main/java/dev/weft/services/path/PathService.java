@@ -142,8 +142,12 @@ public final class PathService implements PathfindingService, AutoCloseable {
             try {
                 Runnable deliver = job.computeThenDeliver.get();
                 lastComputeNanos = System.nanoTime() - t0;
-                computed.increment();
+                // Post before counting: computedCount() > N must imply the
+                // result is already in the owner's channel, so an observer
+                // that spins on the counter and then ticks the owner (the
+                // smoke harness does) can't tick into the enqueue gap.
                 ownerPost.post(job.key, deliver);
+                computed.increment();
             } catch (Throwable t) {
                 // Engine failure: counted, not delivered (documented contract);
                 // the requester's next submission recovers it.

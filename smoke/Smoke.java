@@ -157,6 +157,13 @@ public final class Smoke {
         boolean staggered = true;
         for (int perTick : runsPerTick) staggered &= perTick == 10;
         check(staggered, "throttled AI runs stagger evenly across the interval window");
+        check(ActivationScheduler.shouldDeferRepath(20, 20, 4)
+                        && ActivationScheduler.shouldDeferRepath(80, 20, 4)
+                        && !ActivationScheduler.shouldDeferRepath(81, 20, 4),
+                "repath deferral stretches the vanilla window by the AI interval");
+        check(!ActivationScheduler.shouldDeferRepath(0, 20, 1)
+                        && !ActivationScheduler.shouldDeferRepath(19, 20, 1),
+                "full-rate mobs never have repaths deferred");
 
         // --- WS-2 async pathfinding: ownership discipline + exactly-once ---
         // Deliveries route through the scheduler's mailbox (Message.Task) and
@@ -188,17 +195,40 @@ public final class Smoke {
                     && results.get(0).nodeCount() >= 13, "computed path is real and complete");
 
             // Coalescing: N rapid submits for one requester deliver once, latest wins.
+            // Deterministic setup: park both workers on latch-blocked jobs so
+            // the 5 rapid submits must meet in the queue. Without this a fast
+            // worker legitimately races the submit loop and delivers more
+            // than once - latest-wins bounds staleness, not delivery count.
+            CountDownLatch release = new CountDownLatch(1);
+            for (long sentinel = 100; sentinel <= 101; sentinel++) {
+                paths.submitTask(sentinel, () -> {
+                    try {
+                        release.await();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                    return null;
+                }, r -> {});
+            }
             AtomicInteger coalescedDeliveries = new AtomicInteger();
+            long computedBefore = paths.computedCount();
+            long coalescedBefore = paths.coalescedCount();
             for (int i = 0; i < 5; i++) {
                 paths.submit(2, new PathQuery(0, 64, 0, 3 + i, 64, 0, 0.5, 20_000, 256), flat,
                         r -> coalescedDeliveries.incrementAndGet());
             }
+            release.countDown();
+            // 2 sentinels + 1 surviving key-2 job; computedCount is bumped
+            // after the owner-post, so reaching it means the posts are in.
             deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-            while (paths.queueDepth() > 0 && System.nanoTime() < deadline) Thread.onSpinWait();
-            Thread.sleep(100); // let any in-flight compute post
+            while (paths.computedCount() < computedBefore + 3 && System.nanoTime() < deadline) {
+                Thread.onSpinWait();
+            }
             sched.tick();
-            check(coalescedDeliveries.get() <= 2 && coalescedDeliveries.get() >= 1,
+            check(coalescedDeliveries.get() == 1,
                     "rapid resubmits coalesce (delivered " + coalescedDeliveries.get() + " of 5)");
+            check(paths.coalescedCount() - coalescedBefore == 4,
+                    "superseded submits are counted as coalesced");
         }
 
         // Pathfinder sanity: the engine A* respects walls (no through-wall paths
