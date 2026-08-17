@@ -452,6 +452,18 @@ servers to gather the data that validates every tunable above.
 | **P4** | Race detector + compat DB launch | ≥20 community-verified mods at Tier 1 |
 | **P5** | Hardening, per-region TPS isolation (flagged), Fabric adapter eval | Production-tagged release |
 
+Status (2026-08-17): **P0 complete** (verified in-game; profiler on stock
+servers and the integrated server). **P1 complete** — the spawn-density scan
+is authoritative by default (fail-soft fallback to vanilla's synchronous
+scan, periodic verify ticks) and async pathfinding is on by default after
+clearing its 300-zombie acceptance world at ~50% entity-phase reduction;
+the exit criterion measured as a −5.0% full-tick MSPT delta (p95 −7%) on
+the stock benchmark world, same-run A/B, tracked nightly. See the README
+Status section for the honest numbers and caveats. **P2 is next**:
+regionized vanilla ticking + the legacy lane behind a flag — where WS-10's
+entity sharding (engine-benchmark-proven at 6.5x, RFC-0004) first meets
+real ticking.
+
 ## 12. Risk register (top items)
 
 | Risk | Severity | Mitigation |

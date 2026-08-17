@@ -45,11 +45,15 @@ Full build including the NeoForge mod (needs maven.neoforged.net):
 
 ## Status
 
-Pre-alpha. Current phase: **P0/P1** — engine core with a passing concurrency
-test suite, plus the **P0 profiler**: install the mod on any stock server *or
-single-player world* (it hooks the integrated server too) and it measures how
-much of your pack's tick Weft could parallelize. See RFC-0001 §11 for the
-roadmap and §12 for the honest risk register (start with the Amdahl one).
+Pre-alpha. **P0 and P1 are complete**; next phase is **P2** (regionized
+vanilla ticking + legacy lane, behind a flag). What ships today: the engine
+core with a passing concurrency test suite, the **P0 profiler** (install on
+any stock server *or single-player world* and it measures how much of your
+pack's tick Weft could parallelize), and the **P1 off-thread services** —
+the spawn-density scan authoritative by default and async pathfinding on by
+default, both fail-soft with independent kill switches. See RFC-0001 §11
+for the roadmap and §12 for the honest risk register (start with the
+Amdahl one).
 
 **P0 verified in-game** (2026-08-16, NeoForge 21.1.248 / MC 1.21.1): mod loads,
 all mixins apply cleanly, `/weft report` prints the regionizability report and
@@ -58,14 +62,49 @@ overhead is negligible (~two `System.nanoTime()` calls per entity/BE tick).
 Profiling is toggleable at runtime with `/weft profile on|off`; tunables live
 in `config/weft-common.toml`.
 
-**P1 started — first off-thread service** (same day): the spawn-density scan
-runs as an `AsyncService` in **shadow mode** (vanilla stays authoritative;
-we compute the same state off-thread and diff against it every tick — see
-`/weft services` for live parity numbers). Stress-tested to 65k entities:
-zero service failures, all parity deltas explained by the by-design one-tick
-staleness, and vanilla's own scan cost is now itemized in `/weft report`
-(`natural_spawner/create_state`) as the measured prize for going
-authoritative later.
+**P1 complete — off-thread services are authoritative** (2026-08-17):
+vanilla's spawn-density scan (`NaturalSpawner.createState` — an O(all loaded
+entities) walk on the server thread, every tick, spawning enabled or not) is
+now **served by the async service by default**
+(`spawnDensityMode = AUTHORITATIVE`): the previous tick's off-thread result
+is handed to vanilla as a real `SpawnState` (counts, per-player local caps,
+spawn-potential charges); any tick the result isn't exactly one tick fresh
+falls back to vanilla's synchronous scan for that tick (fail-soft, RFC-0003
+R2), and every 200 ticks a verify tick runs the vanilla scan anyway, uses
+it, and diffs our result against it so parity evidence keeps accumulating
+in production (`/weft services`). Graduation was gated by a hard gametest
+(`spawnDensityAuthoritativeParity`): **exact 100% count parity over a
+converged static world**, then a live-spawning phase driving vanilla's
+spawn attempts through the constructed state (70 monsters spawned, zero
+service failures, zero fallback latches). That gate caught a real bug
+before ship: the capture originally gated chunks with `getChunkNow`
+(chunk-STATUS check) where vanilla's scan gates on the completed
+full-chunk FUTURE — over-counting entities vanilla skips (400 vs 115 on a
+freshly force-loaded world). The capture now queries through vanilla's own
+`getFullChunk`, making the gate — quirks included — identical. Shadow mode
+remains available (`spawnDensityMode = SHADOW`); the earlier 65k-entity
+shadow stress run (zero failures) plus this gate are the graduation
+evidence.
+
+**P1 exit criterion met** (RFC-0001 §11: "measurable TPS win on stock
+packs; API validated by real use"): same-run end-to-end A/B on the stock
+benchmark world (2500 cap-countable passive mobs, no mods), measuring
+full-tick MSPT — the number spark or `/tps` shows an admin:
+**25.35 → 24.08 ms/tick (−5.0%), p95 31.5 → 29.3 ms** with P1 services at
+shipping defaults (spawn density authoritative incl. verify-tick overhead,
+async pathfinding on) versus all-off in the same run; 298/300 ticks served
+async (`p1EndToEndMspt`, tracked nightly by WS-8). Honest framing: the win
+scales with how much of the tick the scan + pathfinding are. This
+benchmark world is entity-tick-dominated; a real Create-pack report
+(2026-08-16) itemizes `create_state` alone at **12.3% of attributed
+cost — the largest single line in that pack** — and pathfinding-stressed
+scenes are far above that (see WS-2 below). Cross-check on your own
+server: `/weft report` itemizes the scan cost it removes and the
+capture/build residual it adds, next to spark's MSPT. The API half of the
+exit is met by two production services on the engine's
+`AsyncService`/path-worker seams. **Next phase: P2 — regionized vanilla
+ticking + legacy lane, behind a flag** — where WS-10's entity sharding
+(so far proven only at the engine level, 6.5x) meets real ticking.
 
 **RFC-0002/0003 workstreams started** (2026-08-16): every Weft optimization
 module now walks the [RFC-0003](docs/RFC-0003-coexistence-policy.md)
@@ -118,13 +157,16 @@ one-glance posture table in the log and `/weft status`. First entries from
   chunk-level A* **30x** over flat A* on a 430-block obstructed path
   (480 us vs 14.6 ms), and a shared flow field serving a 300-mob horde
   **4.1x** cheaper than per-mob A* (10 ms vs 41 ms) even recomputing the
-  flood every call. First same-run in-world A/B (nightly
-  `ws2EntityPhaseReduction` gametest): **~0%** entity-phase change with ~4k
-  requests routed off-thread — the flat benchmark world's paths are too
-  short and cheap for async to matter there, and the earlier cross-run
-  "-18.3% alone" reading was mostly run-to-run variance. The value case is
-  pathfinding-stressed worlds. **Ships off** (`asyncPathfinding = false`)
-  pending in-game acceptance on the 300-zombie stress world.
+  flood every call. In-world acceptance (2026-08-17): the RFC's 300-zombie
+  stress world is now a same-run A/B gametest (`ws2PathStressReduction` —
+  sealed-keep maze, so every horde repath runs vanilla's A* to its
+  visited-node budget): **~50-59% entity-phase reduction across runs**
+  (e.g. 6.93 → 3.44 ms/tick with ~5k requests off-thread). The flat-world
+  trend line (`ws2EntityPhaseReduction`) stays ~0-6% with ~4k requests —
+  paths there are too short and cheap for async to matter much (the earlier
+  cross-run "-18.3% alone" reading was mostly run-to-run variance), which
+  doubles as the "async costs nothing where it can't help" watchdog.
+  **Ships ON** (`asyncPathfinding = true`) on that evidence.
 
 **WS-10 intra-region entity sharding started**
 ([RFC-0004](docs/RFC-0004-entity-sharding.md), engine side, same day): the

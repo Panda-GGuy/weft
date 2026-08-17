@@ -147,8 +147,18 @@ acceptance criterion becomes a tracked benchmark.
   the >=30% entity-phase reduction is measured and tracked nightly
   (`ws1EntityPhaseReduction`, optional until met — first full run: 18.5%
   reduction with 92% of throttleable AI ticks skipped, so clearing the bar
-  needs WS-1 to gate more of the mob tick, not tuning). WS-2..6 criteria join
-  the same harness as they land.
+  needs WS-1 to gate more of the mob tick, not tuning).
+- WS-2 acceptance runs as `ws2PathStressReduction` (the 300-zombie stress
+  world: a sealed-keep maze so every repath runs A* to its node budget) —
+  cleared 2026-08-17 at ~50-59% entity-phase reduction, which flipped
+  `asyncPathfinding` default-on — plus the flat-world watchdog
+  (`ws2EntityPhaseReduction`, ~0-6%: async must cost nothing where paths
+  are cheap). The P1 spawn-density graduation has its own hard gate
+  (`spawnDensityAuthoritativeParity`: exact count parity on a converged
+  static world + a live-spawning phase through the constructed state), and
+  the RFC-0001 P1 exit criterion is tracked as `p1EndToEndMspt` (same-run
+  full-tick MSPT A/B, services at shipping defaults vs all-off). WS-3..6
+  criteria join the same harness as they land.
 
 ### WS-9: Network egress batching
 Phase 6 (EGRESS) grows: off-netty-thread packet serialization, entity-tracker
