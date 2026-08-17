@@ -19,11 +19,15 @@ import net.neoforged.neoforge.event.server.ServerStoppingEvent;
 import org.slf4j.Logger;
 
 /**
- * Mod entry point. P1 scope (RFC-0001 §11): stand the engine up alongside the
- * vanilla tick, telemetry-only — no simulation is rerouted yet. The
- * {@code MinecraftServerMixin} feeds tick boundaries; the engine ticks empty
- * regions and reports phase timings, proving the pipeline in production
- * before it owns anything.
+ * Mod entry point. P1 scope (RFC-0001 §11): the engine runs alongside the
+ * vanilla tick ({@code MinecraftServerMixin} feeds tick boundaries) and real
+ * work now routes through it — WS-1 throttles distant-mob AI in place, and
+ * WS-2 computes mob paths on Weft workers with results delivered through the
+ * scheduler's mailbox ({@link #postToOwner}) at the next tick boundary.
+ * Regions still carry no chunks (vanilla owns simulation state until P2), so
+ * the region phases tick empty and owner routing resolves to the global
+ * inbox, drained on the server thread at INGEST — the same ownership path
+ * that becomes region-mail once P2 lands.
  */
 @Mod("weft")
 public final class WeftMod {
@@ -67,6 +71,21 @@ public final class WeftMod {
                 services.onEnteringSection(e);
             }
         });
+    }
+
+    /**
+     * Post a task to its owner via the scheduler's mailbox (RFC-0001 §4.1):
+     * it runs on the server thread when the scheduler drains the global
+     * inbox at the top of the next tick (INGEST). This is the delivery path
+     * for every async service result (WS-2). Safe from any thread. If the
+     * scheduler is already gone (server stopping), the task is dropped —
+     * its target state is being torn down with it.
+     */
+    public static void postToOwner(Runnable task) {
+        WeftScheduler s = scheduler;
+        if (s != null) {
+            s.submit(new dev.weft.engine.mail.Message.Task(task));
+        }
     }
 
     /** P1 service status for {@code /weft services}; empty before server start. */
@@ -114,6 +133,8 @@ public final class WeftMod {
     }
 
     private void onServerStopping(ServerStoppingEvent event) {
+        // Pathfinding workers first: they post into the scheduler's inbox.
+        dev.weft.neoforge.path.PathfindingHooks.shutdown();
         if (scheduler != null) {
             scheduler.close();
             scheduler = null;

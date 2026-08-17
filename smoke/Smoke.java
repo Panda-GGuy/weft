@@ -1,13 +1,21 @@
 import dev.weft.api.graph.*;
+import dev.weft.api.path.ComputedPath;
+import dev.weft.api.path.NavView;
+import dev.weft.api.path.PathQuery;
 import dev.weft.engine.graph.GraphScheduler;
 import dev.weft.engine.guard.WeftGuards;
 import dev.weft.engine.mail.Mailbox;
+import dev.weft.engine.mail.Message;
 import dev.weft.engine.region.Region;
 import dev.weft.engine.region.RegionManager;
 import dev.weft.engine.sched.WeftScheduler;
+import dev.weft.services.activation.ActivationScheduler;
+import dev.weft.services.path.GridPathfinder;
+import dev.weft.services.path.PathService;
 
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -129,6 +137,80 @@ public final class Smoke {
             gs2.computeAll(pool, 1);
         }
         check(caught.get() == 1, "guard trips when a graph touches region state directly");
+
+        // --- WS-1 activation policy invariants (RFC-0002) ---
+        ActivationScheduler act = new ActivationScheduler(
+                new ActivationScheduler.Tiers(32, 64, 4, 20),
+                Set.of("mod:boss"), Map.of("mod:villager", 1, "mod:snail", 40));
+        check(act.intervalFor("mod:cow", 20 * 20) == 1, "full-rate ring is inviolate");
+        check(act.intervalFor("mod:boss", 500 * 500) == 1, "exempt type never throttled");
+        check(act.intervalFor("mod:villager", 500 * 500) == 1, "override 1 = per-type opt-out");
+        check(act.intervalFor("mod:snail", 50 * 50) == 40, "override replaces tier interval");
+        check(act.intervalFor("mod:cow", 50 * 50) == 4
+                        && act.intervalFor("mod:cow", 500 * 500) == 20, "tier intervals apply by distance");
+        int[] runsPerTick = new int[20];
+        for (long tick = 0; tick < 20; tick++) {
+            for (int id = 0; id < 200; id++) {
+                if (ActivationScheduler.shouldRunThisTick(tick, id, 20)) runsPerTick[(int) tick]++;
+            }
+        }
+        boolean staggered = true;
+        for (int perTick : runsPerTick) staggered &= perTick == 10;
+        check(staggered, "throttled AI runs stagger evenly across the interval window");
+
+        // --- WS-2 async pathfinding: ownership discipline + exactly-once ---
+        // Deliveries route through the scheduler's mailbox (Message.Task) and
+        // must run only when the owner drains it (tick INGEST on the
+        // coordinator thread) - never on a path worker thread.
+        RegionManager rm5 = new RegionManager(1, 7L);
+        GraphScheduler gs5 = new GraphScheduler((g, t) -> EMPTY);
+        try (WeftScheduler sched = new WeftScheduler(2, rm5, gs5, new WeftScheduler.Hooks() {});
+             PathService paths = new PathService("smoke-path", 2,
+                     (key, task) -> sched.submit(new Message.Task(task)))) {
+            Thread coordinator = Thread.currentThread();
+            NavView flat = (x, y, z) -> y == 64 ? 0 : -1;
+            AtomicInteger delivered = new AtomicInteger();
+            Set<Thread> deliveryThreads = ConcurrentHashMap.newKeySet();
+            List<ComputedPath> results = new CopyOnWriteArrayList<>();
+            paths.submit(1, new PathQuery(0, 64, 0, 12, 64, 5, 0.5, 20_000, 256), flat,
+                    r -> { delivered.incrementAndGet(); deliveryThreads.add(Thread.currentThread()); results.add(r); });
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            while (paths.computedCount() < 1 && System.nanoTime() < deadline) Thread.onSpinWait();
+            check(paths.computedCount() == 1, "path computed off-thread");
+            check(delivered.get() == 0, "result NOT applied before the owner's tick boundary");
+            sched.tick();
+            check(delivered.get() == 1, "result applied exactly once at the tick boundary");
+            sched.tick();
+            check(delivered.get() == 1, "no double-apply on later ticks");
+            check(deliveryThreads.equals(Set.of(coordinator)),
+                    "delivery ran on the owning (coordinator) thread, not a path worker");
+            check(results.get(0).status() == ComputedPath.Status.FOUND
+                    && results.get(0).nodeCount() >= 13, "computed path is real and complete");
+
+            // Coalescing: N rapid submits for one requester deliver once, latest wins.
+            AtomicInteger coalescedDeliveries = new AtomicInteger();
+            for (int i = 0; i < 5; i++) {
+                paths.submit(2, new PathQuery(0, 64, 0, 3 + i, 64, 0, 0.5, 20_000, 256), flat,
+                        r -> coalescedDeliveries.incrementAndGet());
+            }
+            deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            while (paths.queueDepth() > 0 && System.nanoTime() < deadline) Thread.onSpinWait();
+            Thread.sleep(100); // let any in-flight compute post
+            sched.tick();
+            check(coalescedDeliveries.get() <= 2 && coalescedDeliveries.get() >= 1,
+                    "rapid resubmits coalesce (delivered " + coalescedDeliveries.get() + " of 5)");
+        }
+
+        // Pathfinder sanity: the engine A* respects walls (no through-wall paths
+        // for the adapter to apply).
+        NavView walled = (x, y, z) -> y != 64 ? -1 : (x == 5 && z != 6) ? -1 : 0;
+        ComputedPath detour = new GridPathfinder().findPath(
+                new PathQuery(0, 64, 0, 10, 64, 0, 0.5, 20_000, 256), walled);
+        boolean crossesAtGap = detour.status() == ComputedPath.Status.FOUND;
+        for (int i = 0; i < detour.nodeCount(); i++) {
+            if (detour.x(i) == 5) crossesAtGap &= detour.z(i) == 6;
+        }
+        check(crossesAtGap, "engine pathfinder only crosses walls at real openings");
 
         System.out.println("\nSMOKE PASSED: " + passed + " checks");
     }

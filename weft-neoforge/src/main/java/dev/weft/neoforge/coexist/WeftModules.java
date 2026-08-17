@@ -66,6 +66,11 @@ public final class WeftModules {
                     ActivationHooks::hooksApplied,
                     ActivationHooks::setActive,
                     ActivationHooks::statusDetail),
+            new Def("pathfinding", "WS-2 async pathfinding service",
+                    () -> WeftConfig.ASYNC_PATHFINDING,
+                    dev.weft.neoforge.path.PathfindingHooks::hooksApplied,
+                    dev.weft.neoforge.path.PathfindingHooks::setActive,
+                    dev.weft.neoforge.path.PathfindingHooks::statusDetail),
             new Def("entity_sharding", "WS-10 intra-region entity sharding",
                     () -> WeftConfig.ENTITY_SHARDING,
                     // Engine-internal today (regions carry no real entities

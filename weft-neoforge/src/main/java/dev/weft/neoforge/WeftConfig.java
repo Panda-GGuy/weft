@@ -105,6 +105,21 @@ public final class WeftConfig {
                     () -> "modid:entity_type=8",
                     o -> o instanceof String s && parseOverride(s) != null);
 
+    // --- WS-2: async pathfinding (RFC-0002; kill switch per RFC-0003 R1) ---
+
+    private static final ModConfigSpec.BooleanValue ASYNC_PATHFINDING_SPEC = BUILDER
+            .comment("WS-2 (RFC-0002): run mob pathfinding (the A* inside createPath) on",
+                    "Weft worker threads; results apply at the next tick boundary while",
+                    "the mob keeps following its previous path. Node evaluation stays",
+                    "vanilla's own (modded NodeEvaluators respected). Independent kill",
+                    "switch (RFC-0003 R1); ships off pending in-game acceptance runs.")
+            .define("asyncPathfinding", false);
+
+    private static final ModConfigSpec.IntValue PATHFINDING_THREADS_SPEC = BUILDER
+            .comment("Worker threads for the pathfinding service. Takes effect when the",
+                    "module (re)activates.")
+            .defineInRange("pathfindingThreads", 2, 1, 8);
+
     // --- WS-10: intra-region entity sharding (RFC-0004; kill switch per RFC-0003 R1) ---
 
     private static final ModConfigSpec.BooleanValue ENTITY_SHARDING_SPEC = BUILDER
@@ -154,6 +169,8 @@ public final class WeftConfig {
             "minecraft:ender_dragon", "minecraft:wither",
             "minecraft:warden", "minecraft:elder_guardian");
     public static volatile Map<String, Integer> ACTIVATION_TYPE_OVERRIDES = Map.of();
+    public static volatile boolean ASYNC_PATHFINDING = false;
+    public static volatile int PATHFINDING_THREADS = 2;
     public static volatile boolean ENTITY_SHARDING = false;
     public static volatile int ENTITY_SHARD_MIN_BATCH = 64;
     public static volatile Set<String> FORCE_ENABLE_MODULES = Set.of();
@@ -202,6 +219,8 @@ public final class WeftConfig {
             }
         }
         ACTIVATION_TYPE_OVERRIDES = Map.copyOf(overrides);
+        ASYNC_PATHFINDING = ASYNC_PATHFINDING_SPEC.get();
+        PATHFINDING_THREADS = PATHFINDING_THREADS_SPEC.get();
         ENTITY_SHARDING = ENTITY_SHARDING_SPEC.get();
         ENTITY_SHARD_MIN_BATCH = ENTITY_SHARD_MIN_BATCH_SPEC.get();
         FORCE_ENABLE_MODULES = Set.copyOf(FORCE_ENABLE_MODULES_SPEC.get());

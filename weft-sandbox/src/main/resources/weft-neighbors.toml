@@ -4,7 +4,8 @@
 # default to cooperate; Tier-3 mixin-overlap scanning is the backstop.
 # Updating compat for a new mod is a one-line PR here.
 #
-# Current Weft module ids: profiler, spawn_shadow, activation, entity_sharding.
+# Current Weft module ids: profiler, spawn_shadow, activation, pathfinding,
+# entity_sharding.
 # (Any mod that patches entity-tick internals directly is a tick-ownership
 # overlap for entity_sharding: posture "refuse", per RFC-0004 sec. 3. No such
 # NeoForge mod is known today; add its modid here the day one appears.)
@@ -20,6 +21,19 @@ profiler = "cooperate"
 # *frequency*. Different levers on the same subsystem - they compose. Flip to
 # "yield" if a colliding mixin territory ever appears (R7 CI matrix catches it).
 activation = "cooperate"
+# Lithium makes each findPath cheaper; WS-2 moves it off-thread. They compose
+# today (different call layers), but this is the likeliest future collision -
+# watch the R7 matrix.
+pathfinding = "cooperate"
+
+# Dedicated async-pathfinding mods occupy exactly WS-2's territory: one
+# subsystem, one owner (their implementation runs). Best-effort modid seeds;
+# harmless if never matched, one-line PR to correct.
+[asyncpathfinding]
+pathfinding = "yield"
+
+[async_pathfinding]
+pathfinding = "yield"
 
 [alternate_current]
 # Seed for WS-3 redstone compilation (RFC-0002): their implementation runs.

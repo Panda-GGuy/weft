@@ -25,7 +25,7 @@ the testing playbook live on the
 | `weft-engine` | Scheduler, regions, mailboxes, guards, graph scheduler | **None** (enforced at build) |
 | `weft-api` | Annotations + interfaces mods target (`@WeftSafe`, `RegionScheduler`, graph API) | **None** (enforced) |
 | `weft-sandbox` | Mod tier classification, legacy lane, coexistence policy (RFC-0003) | None (pure parts) |
-| `weft-services` | Engine-side services for the RFC-0002 workstreams (WS-1 activation scheduling) | **None** (enforced) |
+| `weft-services` | Engine-side services for the RFC-0002 workstreams (WS-1 activation, WS-2 pathfinding) | **None** (enforced) |
 | `weft-neoforge` | The actual mod: mixins, event bus adaptation, config | NeoForge 1.21.1 |
 | `weft-adapters` | Per-mod graph adapters (Create, AE2, …) | Planned (P3) |
 
@@ -83,9 +83,30 @@ one-glance posture table in the log and `/weft status`. First entries from
   their sensing and goal/target selectors at reduced frequency (32/64-block
   tiers, 1/4 and 1/20 rates by default) while movement, navigation, brains,
   and despawn accounting stay per-tick. Fail-soft mixin (self-disables if it
-  cannot apply), per-type overrides and exemptions in config. **Ships off**
-  (`activationScheduling = false`) until the WS-8 acceptance benchmark
-  (2k passive + 500 hostile, >=30% entity-phase reduction) proves it.
+  cannot apply), per-type overrides and exemptions in config. The engine-side
+  acceptance A/B (2k passive + 500 hostile on the profiled world shape,
+  `ActivationPhaseBench`) shows **72% entity-phase reduction** (634 us ->
+  177 us per tick, decision cost ~12 ns/mob) — well past the >=30% bar; the
+  in-game benchmark-world run (WS-8 remainder) is what's left before the
+  default flips. `/weft report` now prints a **projected WS-1 savings** line
+  for *your* pack: every entity sample records the interval the configured
+  tiers would assign it, so the report answers "what would enabling this buy
+  me" before you flip `activationScheduling = true`.
+- **WS-2 async pathfinding** (the RFC-0001 P1 off-thread service): the A*
+  inside `PathNavigation.createPath` runs on Weft path workers instead of
+  the server thread. Node evaluation stays vanilla's own per-mob
+  `PathFinder` (modded NodeEvaluators respected) over the region snapshot
+  vanilla already captures on-thread; results return through the engine
+  scheduler's mailbox and apply at the next tick boundary while the mob
+  keeps following its previous path (no stutter, exactly-once apply —
+  smoke-checked). Single-flight per mob: rapid repaths coalesce, latest
+  wins. The engine-native pathfinder that takes over at P2 landed alongside
+  it in `weft-services` with the WS-8 numbers to justify it: hierarchical
+  chunk-level A* **30x** over flat A* on a 430-block obstructed path
+  (480 us vs 14.6 ms), and a shared flow field serving a 300-mob horde
+  **4.1x** cheaper than per-mob A* (10 ms vs 41 ms) even recomputing the
+  flood every call. **Ships off** (`asyncPathfinding = false`) pending
+  in-game acceptance on the 300-zombie stress world.
 
 **WS-10 intra-region entity sharding started**
 ([RFC-0004](docs/RFC-0004-entity-sharding.md), engine side, same day): the
