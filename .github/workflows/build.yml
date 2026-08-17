@@ -28,9 +28,6 @@ jobs:
   neoforge:
     name: "NeoForge mod (1.21.1)"
     runs-on: ubuntu-latest
-    # Scaffold module: keep visible in CI without gating merges until P1 wiring
-    # is complete. Flip to required once green.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v5
