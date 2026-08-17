@@ -4,6 +4,7 @@ import dev.weft.engine.telemetry.TickProfiler;
 import dev.weft.engine.telemetry.TickSample;
 import dev.weft.neoforge.WeftConfig;
 import dev.weft.neoforge.activation.ActivationHooks;
+import dev.weft.neoforge.path.PathfindingHooks;
 import dev.weft.neoforge.profiler.WeftProfiler;
 import net.minecraft.core.BlockPos;
 import net.minecraft.gametest.framework.GameTest;
@@ -32,12 +33,16 @@ import java.util.Locale;
  *       break.</li>
  *   <li>{@link #ws1EntityPhaseReduction} — ">=30% entity-phase reduction" —
  *       measured and tracked nightly, asserted as an <em>optional</em> test
- *       ({@code required = false}): the first full run measured 18.5% with
- *       92% of throttleable AI ticks skipped, i.e. the current
- *       sensing+goal-selector gating is at its asymptote and WS-1 needs to
- *       cover more of the mob tick to clear the bar. Flip {@code required}
- *       to true the day it does — until then {@code activationScheduling}
- *       keeps shipping default-off (RFC-0002 WS-1).</li>
+ *       ({@code required = false}): same-run A/B measures 15-21.5% across
+ *       runs (single-run noise is several points) with 92% of throttleable
+ *       AI ticks skipped. Profiler sub-attribution (2026-08-16) explains the
+ *       gap: the whole AI step ({@code serverAiStep}) is only ~19-20% of
+ *       this world's entity phase — movement/physics is the rest — so no
+ *       amount of AI-frequency gating clears 30% on this population. The
+ *       bar waits on a different lever (WS-10 sharding compounding, or a
+ *       cheaper entity base tick), not on more WS-1 widening. Until
+ *       something clears it, {@code activationScheduling} keeps shipping
+ *       default-off (RFC-0002 WS-1).</li>
  * </ul>
  *
  * <p>The entity phase is measured exactly as the P0 profiler defines it: the
@@ -94,6 +99,13 @@ public class WeftBenchGameTests {
                         + " - is the optimizations mixin applied? hooksApplied="
                         + ActivationHooks.hooksApplied());
             }
+            // The repath half of WS-1 can't prove engagement here (the flat
+            // benchmark world has no block churn, so recomputePath traffic is
+            // ~zero) - but a silently-unapplied fail-soft mixin must not pass
+            // CI unnoticed either. Application is the checkable part.
+            if (!ActivationHooks.repathHooksApplied()) {
+                helper.fail("WS-1 repath-throttle mixin did not apply to PathNavigation");
+            }
             helper.succeed();
         });
     }
@@ -114,6 +126,7 @@ public class WeftBenchGameTests {
 
         long[] phaseStartTick = new long[1];
         EntityPhase[] baseline = new EntityPhase[1];
+        ActivationHooks.Counters[] countersAtActivation = new ActivationHooks.Counters[1];
 
         helper.onEachTick(() -> arena.bot().tickCircle(BOT_CIRCLE_RADIUS));
 
@@ -125,11 +138,14 @@ public class WeftBenchGameTests {
         helper.runAfterDelay(WARMUP_TICKS + PHASE_TICKS, () -> {
             baseline[0] = entityPhaseMsPerTick(helper, phaseStartTick[0]);
             ActivationHooks.setActive(true);
+            countersAtActivation[0] = ActivationHooks.counters();
             phaseStartTick[0] = WeftProfiler.get().tickCounter();
         });
 
         helper.runAfterDelay(WARMUP_TICKS + 2 * PHASE_TICKS, () -> {
             EntityPhase activated = entityPhaseMsPerTick(helper, phaseStartTick[0]);
+            ActivationHooks.Counters engaged =
+                    ActivationHooks.counters().minus(countersAtActivation[0]);
             double baselineMsPerTick = baseline[0].totalMs();
             double activatedMsPerTick = activated.totalMs();
             WeftConfig.PROFILE_WINDOW_TICKS = 100;
@@ -159,10 +175,11 @@ public class WeftBenchGameTests {
                     "ws1_entity_phase_activation_scheduling", "ms/tick", activatedMsPerTick,
                     String.format(Locale.ROOT,
                             "%.1f%% entity-phase reduction (acceptance bar: >=%.0f%%); "
-                                    + "%d passive + %d hostile mobs, %d measured ticks/phase",
+                                    + "%d passive + %d hostile mobs, %d measured ticks/phase; "
+                                    + "%d AI skips, %d repaths deferred (WS-2 requests avoided)",
                             reduction, requiredReductionPct(),
                             BenchmarkWorld.PASSIVE_COUNT, BenchmarkWorld.HOSTILE_COUNT,
-                            PHASE_TICKS));
+                            PHASE_TICKS, engaged.skips(), engaged.repathDeferrals()));
 
             if (reduction < requiredReductionPct()) {
                 helper.fail(String.format(Locale.ROOT,
@@ -170,6 +187,76 @@ public class WeftBenchGameTests {
                                 + "(vanilla %.3f ms/tick, activated %.3f ms/tick)",
                         reduction, requiredReductionPct(),
                         baselineMsPerTick, activatedMsPerTick));
+            }
+            helper.succeed();
+        });
+    }
+
+    /**
+     * WS-2 nightly trend line (RFC-0002): A/B entity-phase measurement over
+     * identical bot walks, synchronous vanilla pathfinding vs the async path
+     * service — the same-run mirror of {@link #ws1EntityPhaseReduction}, so
+     * WS-2's in-world effect stops being a cross-run comparison. WS-2's
+     * acceptance is "main-thread reduction + behavior sanity" with no fixed
+     * percentage bar, so the test records the numbers and only fails on a
+     * vacuous run (the service never engaged — which would silently turn the
+     * trend line into noise).
+     *
+     * <p>First same-run measurement (2026-08-16): ~0.2% with ~4k requests
+     * routed off-thread — this flat world's paths are short and cheap, so
+     * there is little synchronous A* cost to remove, and the earlier
+     * "-18.3% WS-2 alone" cross-run reading was mostly run-to-run variance.
+     * WS-2's value case is pathfinding-stressed worlds (obstructed terrain,
+     * hordes); this trend line keeps it honest either way.
+     */
+    @GameTest(template = "empty", batch = "ws2measure", timeoutTicks = 1200, required = false)
+    public void ws2EntityPhaseReduction(GameTestHelper helper) {
+        Arena arena = Arena.setUp(helper, "WeftWs2Bot");
+        WeftConfig.PROFILING_ENABLED = true;
+        WeftConfig.PROFILE_WINDOW_TICKS = PHASE_TICKS + 64;
+        PathfindingHooks.setActive(false);
+
+        long[] phaseStartTick = new long[1];
+        EntityPhase[] baseline = new EntityPhase[1];
+        long[] submittedAtActivation = new long[1];
+
+        helper.onEachTick(() -> arena.bot().tickCircle(BOT_CIRCLE_RADIUS));
+
+        // Phase A: synchronous vanilla pathfinding.
+        helper.runAfterDelay(WARMUP_TICKS,
+                () -> phaseStartTick[0] = WeftProfiler.get().tickCounter());
+
+        // Phase B: async pathfinding on.
+        helper.runAfterDelay(WARMUP_TICKS + PHASE_TICKS, () -> {
+            baseline[0] = entityPhaseMsPerTick(helper, phaseStartTick[0]);
+            PathfindingHooks.setActive(true);
+            submittedAtActivation[0] = PathfindingHooks.submittedCount();
+            phaseStartTick[0] = WeftProfiler.get().tickCounter();
+        });
+
+        helper.runAfterDelay(WARMUP_TICKS + 2 * PHASE_TICKS, () -> {
+            EntityPhase activated = entityPhaseMsPerTick(helper, phaseStartTick[0]);
+            long requests = PathfindingHooks.submittedCount() - submittedAtActivation[0];
+            WeftConfig.PROFILE_WINDOW_TICKS = 100;
+            arena.tearDown();
+
+            double reduction = 100.0 * (1.0 - activated.totalMs() / baseline[0].totalMs());
+            BenchRecorder.record(helper.getLevel().getServer(),
+                    "ws2_entity_phase_sync_pathfinding", "ms/tick", baseline[0].totalMs(),
+                    "async pathfinding OFF (baseline)");
+            BenchRecorder.record(helper.getLevel().getServer(),
+                    "ws2_entity_phase_async_pathfinding", "ms/tick", activated.totalMs(),
+                    String.format(Locale.ROOT,
+                            "%.1f%% entity-phase reduction; %d requests routed off-thread; "
+                                    + "%d passive + %d hostile mobs, %d measured ticks/phase",
+                            reduction, requests,
+                            BenchmarkWorld.PASSIVE_COUNT, BenchmarkWorld.HOSTILE_COUNT,
+                            PHASE_TICKS));
+
+            if (requests == 0) {
+                helper.fail("WS-2 never engaged: zero path requests routed off-thread - "
+                        + "is the optimizations mixin applied? hooksApplied="
+                        + PathfindingHooks.hooksApplied());
             }
             helper.succeed();
         });
@@ -227,6 +314,9 @@ public class WeftBenchGameTests {
 
         void tearDown() {
             ActivationHooks.setActive(false);
+            // R6: deactivation closes the path workers; a no-op when the test
+            // never activated WS-2.
+            PathfindingHooks.setActive(false);
             population.discard();
             bot.leave();
             forceChunks(level, origin, false);
@@ -279,6 +369,17 @@ public class WeftBenchGameTests {
                 if (distSq <= FULL_RATE_DIST_SQ && !ActivationHooks.shouldTickAi(mob)) {
                     helper.fail(String.format(Locale.ROOT,
                             "WS-1 parity violation: %s at %.1f blocks from the bot was denied its AI tick",
+                            mob.getType(), Math.sqrt(distSq)));
+                }
+                // Repath half of the same criterion: inside the full-rate ring
+                // a recompute one tick after the last one - deep inside
+                // vanilla's own 20-tick window - must never be deferred by us
+                // (vanilla's own delay logic stays authoritative there).
+                long gameTime = arena.level().getGameTime();
+                if (distSq <= FULL_RATE_DIST_SQ
+                        && ActivationHooks.shouldDeferRepath(mob, gameTime, gameTime - 1)) {
+                    helper.fail(String.format(Locale.ROOT,
+                            "WS-1 parity violation: %s at %.1f blocks from the bot had its repath deferred",
                             mob.getType(), Math.sqrt(distSq)));
                 }
             }

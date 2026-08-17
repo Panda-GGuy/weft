@@ -87,16 +87,24 @@ one-glance posture table in the log and `/weft status`. First entries from
   acceptance A/B (2k passive + 500 hostile on the profiled world shape,
   `ActivationPhaseBench`) shows **72% entity-phase reduction** (634 us ->
   177 us per tick, decision cost ~12 ns/mob) — but that is a *model* upper
-  bound (it assumes throttled AI dominates a mob's tick cost). Early
-  in-world benchmark runs measure ~19-21%, under the >=30% bar, with 92%
-  of throttleable AI ticks skipped: the ceiling is how much of the mob tick
-  the mixin gates (sensing + selectors today), not the scheduler. Widening
-  the gated surface (brain ticking, navigation recompute frequency) is the
-  open WS-1 work before the default flips.
-  `/weft report` now prints a **projected WS-1 savings** line
-  for *your* pack: every entity sample records the interval the configured
-  tiers would assign it, so the report answers "what would enabling this buy
-  me" before you flip `activationScheduling = true`.
+  bound (it assumes throttled AI dominates a mob's tick cost). In-world
+  same-run A/B measures **15-21.5%** across runs, under the >=30% bar, with
+  92% of throttleable AI ticks skipped. Profiler **AI sub-attribution**
+  (a second timing slice around `serverAiStep`) now explains the ceiling:
+  the whole AI step — sensing, selectors, navigation, brain, controls — is
+  only **~19-20% of the benchmark world's entity phase**; movement/physics
+  is the rest, and no amount of AI-frequency gating touches it. WS-1 alone
+  therefore cannot clear 30% on that population; the bar waits on WS-10
+  sharding compounding (P2) or a cheaper entity base tick. Widened gating
+  still landed: a throttled mob now also stretches its periodic
+  path-recompute window by its AI interval (never inside the 32-block
+  full-rate ring; exemptions inviolate; fail-soft, same module switch) —
+  inert on the flat benchmark world (no block churn means no recompute
+  traffic) but it cuts repath and WS-2 request volume in block-busy worlds.
+  `/weft report` prints the AI/movement split, a **projected WS-1 savings**
+  line for *your* pack, and a *measured* "what would widening buy" line, so
+  the report answers "what would enabling this buy me" before you flip
+  `activationScheduling = true`.
 - **WS-2 async pathfinding** (the RFC-0001 P1 off-thread service): the A*
   inside `PathNavigation.createPath` runs on Weft path workers instead of
   the server thread. Node evaluation stays vanilla's own per-mob
@@ -110,8 +118,13 @@ one-glance posture table in the log and `/weft status`. First entries from
   chunk-level A* **30x** over flat A* on a 430-block obstructed path
   (480 us vs 14.6 ms), and a shared flow field serving a 300-mob horde
   **4.1x** cheaper than per-mob A* (10 ms vs 41 ms) even recomputing the
-  flood every call. **Ships off** (`asyncPathfinding = false`) pending
-  in-game acceptance on the 300-zombie stress world.
+  flood every call. First same-run in-world A/B (nightly
+  `ws2EntityPhaseReduction` gametest): **~0%** entity-phase change with ~4k
+  requests routed off-thread — the flat benchmark world's paths are too
+  short and cheap for async to matter there, and the earlier cross-run
+  "-18.3% alone" reading was mostly run-to-run variance. The value case is
+  pathfinding-stressed worlds. **Ships off** (`asyncPathfinding = false`)
+  pending in-game acceptance on the 300-zombie stress world.
 
 **WS-10 intra-region entity sharding started**
 ([RFC-0004](docs/RFC-0004-entity-sharding.md), engine side, same day): the

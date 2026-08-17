@@ -97,6 +97,11 @@ public final class PathfindingHooks {
         return pending;
     }
 
+    /** Requests routed off-thread since boot (WS-8: engagement/vacuous-pass check). */
+    public static long submittedCount() {
+        return submitted.sum();
+    }
+
     /** Extra detail for the posture report / {@code /weft status} (R5). */
     public static String statusDetail() {
         PathService s = service;
