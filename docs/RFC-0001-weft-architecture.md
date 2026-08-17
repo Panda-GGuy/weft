@@ -466,7 +466,8 @@ tick-ownership increment 1 behind `regionizedTicking` (default off):
 entity + block-entity ticking routed through the engine as one serial
 region per level on the server thread — bit-identical by construction,
 parity green at RFC-0005 class E0. The §12 kill -9 save-recoverability
-harness and the RFC-0003 R7 neighbor-boot matrix run in CI. Increment 2
+harness and the RFC-0003 R7 neighbor-boot matrix run in CI (first runs
+green 2026-08-17). Increment 2
 (same day): the real chunk→region mapping is live — per-level
 RegionManagers fed by actual chunk load/unload, §4.2 invariants gated by
 the p2regions gametest — as always-on bookkeeping; owner routing stays on

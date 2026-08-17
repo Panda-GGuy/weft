@@ -137,12 +137,12 @@ dedicated server, forceloaded chunk plate, `save-all` then `kill -9` mid-save
 ×4, world must boot clean) and the **RFC-0003 R7 neighbor-boot matrix**
 (`neighbors.yml` — stub modids exercise cooperate/yield/refuse postures
 end-to-end, including Forgia/NeoFolia-class tick-ownership engines now
-seeded as `refuse` in the registry) — both nightly workflows, authored and
-syntax-checked 2026-08-17 with first scheduled executions pending, so treat
-them as unproven until they have a green run — plus a coexistence-policy fix
-the R7 work surfaced: **force-enable can no longer out-rank a REFUSE** — R4
-licenses overriding a yield, never an ownership conflict (unit-gated in
-`CoexistencePolicyTest`). Next increments (the legacy lane,
+seeded as `refuse` in the registry) — **both proven green on their first
+dispatched runs** (2026-08-17: chaos recovered cleanly from 4 kill -9 torn
+saves; all four neighbor cells asserted their postures) and nightly from
+here — plus a coexistence-policy fix the R7 work surfaced: **force-enable
+can no longer out-rank a REFUSE** — R4 licenses overriding a yield, never
+an ownership conflict (unit-gated in `CoexistencePolicyTest`). Next increments (the legacy lane,
 parallel regions, WS-10 activation) each stay off until the parity suite is
 green at their declared equivalence class (RFC-0005 §4).
 
