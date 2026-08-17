@@ -7,7 +7,7 @@ package dev.weft.engine.guard;
  */
 public final class ThreadContext {
 
-    public enum Kind { REGION, GRAPH, GLOBAL, LEGACY, NONE }
+    public enum Kind { REGION, SHARD, GRAPH, GLOBAL, LEGACY, NONE }
 
     private static final ThreadLocal<ThreadContext> CURRENT =
             ThreadLocal.withInitial(() -> new ThreadContext(Kind.NONE, -1));

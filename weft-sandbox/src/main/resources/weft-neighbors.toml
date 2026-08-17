@@ -4,7 +4,10 @@
 # default to cooperate; Tier-3 mixin-overlap scanning is the backstop.
 # Updating compat for a new mod is a one-line PR here.
 #
-# Current Weft module ids: profiler, spawn_shadow, activation.
+# Current Weft module ids: profiler, spawn_shadow, activation, entity_sharding.
+# (Any mod that patches entity-tick internals directly is a tick-ownership
+# overlap for entity_sharding: posture "refuse", per RFC-0004 sec. 3. No such
+# NeoForge mod is known today; add its modid here the day one appears.)
 # (Entries for modules that do not exist yet are seed data - harmless until
 # the module registers itself under that id.)
 

@@ -75,6 +75,30 @@ public final class WeftMod {
         return s == null ? java.util.List.of("Server not running.") : s.statusLines();
     }
 
+    // WS-10 (RFC-0004): the coexistence resolution owns this flag; the
+    // scheduler is created after the first resolve, so remember it here and
+    // apply on both creation and re-resolution.
+    private static volatile boolean entityShardingActive;
+
+    /** Wired as the entity_sharding module's applyActive (RFC-0003 R6). */
+    public static void applyEntitySharding(boolean active) {
+        entityShardingActive = active;
+        WeftScheduler s = scheduler;
+        if (s != null) {
+            s.setEntitySharding(active, WeftConfig.ENTITY_SHARD_MIN_BATCH);
+        }
+    }
+
+    /** R5 extra detail for the posture table / {@code /weft status}. */
+    public static String entityShardingDetail() {
+        WeftScheduler s = scheduler;
+        if (s == null) {
+            return "";
+        }
+        return String.format("last tick: %d regions sharded, max %d shards",
+                s.lastShardedRegions(), s.lastMaxShards());
+    }
+
     private void onServerAboutToStart(ServerAboutToStartEvent event) {
         // RFC-0003 R5: resolve every module down the coexistence ladder and
         // log the one-glance posture table before anything starts working.
@@ -86,6 +110,7 @@ public final class WeftMod {
         scheduler = new WeftScheduler(
                 Math.max(2, Runtime.getRuntime().availableProcessors() - WeftConfig.RESERVED_THREADS),
                 regions, graphs, new WeftHooks());
+        scheduler.setEntitySharding(entityShardingActive, WeftConfig.ENTITY_SHARD_MIN_BATCH);
     }
 
     private void onServerStopping(ServerStoppingEvent event) {

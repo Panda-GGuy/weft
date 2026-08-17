@@ -87,6 +87,21 @@ one-glance posture table in the log and `/weft status`. First entries from
   (`activationScheduling = false`) until the WS-8 acceptance benchmark
   (2k passive + 500 hostile, >=30% entity-phase reduction) proves it.
 
+**WS-10 intra-region entity sharding started**
+([RFC-0004](docs/RFC-0004-entity-sharding.md), engine side, same day): the
+second parallelism axis, for the worlds where region-level parallelism
+flatlines at 1.00x by construction (one player = one region). Big regions fan
+their tickables out over shards — each shard a serial loop with its own
+`SHARD` ownership context, pre-split deterministic RNG substream, and an
+**entity effect log** (the entity-layer `CommitLog`: damage, item claims,
+love mode, spawn/remove are recorded during the parallel pass and applied in
+one deterministic (source, seq) order, so contested claims resolve
+identically at any shard count). Engine benchmark on the profiled solo-play
+shape (2000 tickables, one region): **1637 us serial vs 254 us sharded
+(6.5x)**, tracked nightly by WS-8. **Ships off** (`entitySharding = false`)
+per RFC-0004 §2.5 — within-tick interleaving is not vanilla's exact list
+order — and the engine does not own real entity ticking until P2 anyway.
+
 ## Trying the P0 profiler locally
 
 1. Build the jar: \`./gradlew :weft-neoforge:build -PwithNeoForge\`

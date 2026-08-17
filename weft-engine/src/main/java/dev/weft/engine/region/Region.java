@@ -20,6 +20,16 @@ public final class Region {
     @FunctionalInterface
     public interface Tickable {
         void tick(Region region, long tickNumber);
+
+        /**
+         * Sharded-path entry point (RFC-0004): same contract as
+         * {@link #tick(Region, long)} plus the shard's RNG substream and
+         * effect log. Tickables that never interact cross-entity can ignore
+         * it — the default delegates to the serial signature.
+         */
+        default void tick(Region region, long tickNumber, dev.weft.engine.shard.ShardContext shard) {
+            tick(region, tickNumber);
+        }
     }
 
     private final long id;

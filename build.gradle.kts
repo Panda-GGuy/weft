@@ -58,6 +58,8 @@ subprojects {
             mainClass.set("org.openjdk.jmh.Main")
             val resultFile = layout.buildDirectory.file("reports/jmh/results.json")
             outputs.file(resultFile)
+            // A measurement is never "up to date" — numbers, not artifacts.
+            outputs.upToDateWhen { false }
             doFirst { resultFile.get().asFile.parentFile.mkdirs() }
             args("-rf", "json", "-rff", resultFile.get().asFile.absolutePath)
             // JavaExec doesn't inherit the project toolchain; pin the launcher

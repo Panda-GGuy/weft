@@ -65,7 +65,16 @@ public final class WeftModules {
                     () -> WeftConfig.ACTIVATION_SCHEDULING,
                     ActivationHooks::hooksApplied,
                     ActivationHooks::setActive,
-                    ActivationHooks::statusDetail));
+                    ActivationHooks::statusDetail),
+            new Def("entity_sharding", "WS-10 intra-region entity sharding",
+                    () -> WeftConfig.ENTITY_SHARDING,
+                    // Engine-internal today (regions carry no real entities
+                    // until P2's tick-ownership mixins); once those land,
+                    // this becomes their R2 applied-check and a failure
+                    // floors the shard count to 1 (RFC-0004 §3).
+                    () -> true,
+                    dev.weft.neoforge.WeftMod::applyEntitySharding,
+                    dev.weft.neoforge.WeftMod::entityShardingDetail));
 
     private static volatile NeighborRegistry registry;
     private static volatile boolean resolvedOnce;

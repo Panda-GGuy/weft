@@ -105,6 +105,20 @@ public final class WeftConfig {
                     () -> "modid:entity_type=8",
                     o -> o instanceof String s && parseOverride(s) != null);
 
+    // --- WS-10: intra-region entity sharding (RFC-0004; kill switch per RFC-0003 R1) ---
+
+    private static final ModConfigSpec.BooleanValue ENTITY_SHARDING_SPEC = BUILDER
+            .comment("WS-10 (RFC-0004): fan a big region's tickables out across worker",
+                    "threads (the solo-play / one-region lever). Opt-in and off by default",
+                    "until the parity suite proves it (RFC-0004 sec. 2.5): within-tick",
+                    "entity interleaving is no longer vanilla's exact list order, though",
+                    "outcomes are deterministic and reproducible.")
+            .define("entitySharding", false);
+
+    private static final ModConfigSpec.IntValue ENTITY_SHARD_MIN_BATCH_SPEC = BUILDER
+            .comment("Minimum tickables per shard; regions below this stay serial.")
+            .defineInRange("entityShardMinBatch", 64, 1, 100_000);
+
     // --- RFC-0003 R4: user overrides of the coexistence ladder, both directions ---
 
     private static final ModConfigSpec.ConfigValue<List<? extends String>> FORCE_ENABLE_MODULES_SPEC = BUILDER
@@ -140,6 +154,8 @@ public final class WeftConfig {
             "minecraft:ender_dragon", "minecraft:wither",
             "minecraft:warden", "minecraft:elder_guardian");
     public static volatile Map<String, Integer> ACTIVATION_TYPE_OVERRIDES = Map.of();
+    public static volatile boolean ENTITY_SHARDING = false;
+    public static volatile int ENTITY_SHARD_MIN_BATCH = 64;
     public static volatile Set<String> FORCE_ENABLE_MODULES = Set.of();
     public static volatile Set<String> FORCE_DISABLE_MODULES = Set.of();
 
@@ -186,6 +202,8 @@ public final class WeftConfig {
             }
         }
         ACTIVATION_TYPE_OVERRIDES = Map.copyOf(overrides);
+        ENTITY_SHARDING = ENTITY_SHARDING_SPEC.get();
+        ENTITY_SHARD_MIN_BATCH = ENTITY_SHARD_MIN_BATCH_SPEC.get();
         FORCE_ENABLE_MODULES = Set.copyOf(FORCE_ENABLE_MODULES_SPEC.get());
         FORCE_DISABLE_MODULES = Set.copyOf(FORCE_DISABLE_MODULES_SPEC.get());
     }
