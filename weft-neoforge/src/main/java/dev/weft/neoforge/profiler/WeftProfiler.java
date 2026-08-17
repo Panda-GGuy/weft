@@ -33,7 +33,13 @@ public final class WeftProfiler {
     /** Recreated when the configured window size changes; volatile because
      *  report generation may happen from a command/console thread. */
     private volatile TickProfiler profiler;
-    private final ArrayDeque<Long> nanoStack = new ArrayDeque<>();
+    /**
+     * One frame per open HEAD/RETURN pair: {@code [startNanos, aiAccumNanos,
+     * aiSliceStartNanos]}. The AI slice ({@code Mob.serverAiStep}) accumulates
+     * into the innermost open frame, so a passenger mob's AI time lands in its
+     * vehicle's sample — consistent with where its total cost already lands.
+     */
+    private final ArrayDeque<long[]> nanoStack = new ArrayDeque<>();
     private long tickCounter;
 
     /**
@@ -77,7 +83,34 @@ public final class WeftProfiler {
         if (!WeftConfig.PROFILING_ENABLED || Thread.currentThread() != serverThread) {
             return;
         }
-        nanoStack.push(System.nanoTime());
+        nanoStack.push(new long[]{System.nanoTime(), 0L, 0L});
+    }
+
+    /**
+     * Start of the AI slice inside a mob tick ({@code Mob.serverAiStep} HEAD).
+     * Tolerates having no open frame (profiling toggled on mid-tick, or an AI
+     * step reached outside a hooked entity tick) by doing nothing.
+     */
+    public void aiSliceStart() {
+        if (!WeftConfig.PROFILING_ENABLED || Thread.currentThread() != serverThread) {
+            return;
+        }
+        long[] frame = nanoStack.peek();
+        if (frame != null) {
+            frame[2] = System.nanoTime();
+        }
+    }
+
+    /** End of the AI slice; accumulates into the innermost open frame. */
+    public void aiSliceEnd() {
+        if (!WeftConfig.PROFILING_ENABLED || Thread.currentThread() != serverThread) {
+            return;
+        }
+        long[] frame = nanoStack.peek();
+        if (frame != null && frame[2] != 0L) {
+            frame[1] += System.nanoTime() - frame[2];
+            frame[2] = 0L;
+        }
     }
 
     public void popEntity(String typeId, long chunkKey) {
@@ -104,10 +137,10 @@ public final class WeftProfiler {
         }
         // poll() is null on empty: tolerates a toggle-on between HEAD and
         // RETURN of the same tickable (push skipped, pop not).
-        Long start = nanoStack.poll();
+        long[] frame = nanoStack.poll();
         TickProfiler p = profiler;
-        if (start != null && p != null) {
-            p.record(source, typeId, chunkKey, System.nanoTime() - start, aiInterval);
+        if (frame != null && p != null) {
+            p.record(source, typeId, chunkKey, System.nanoTime() - frame[0], aiInterval, frame[1]);
         }
     }
 

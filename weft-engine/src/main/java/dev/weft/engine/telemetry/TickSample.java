@@ -16,14 +16,29 @@ package dev.weft.engine.telemetry;
  *                   or non-entity work. Recorded regardless of whether the
  *                   activation module is active, so the report can project
  *                   savings before anyone flips the switch.
+ * @param aiNanos    the slice of {@code nanos} spent inside the mob's AI step
+ *                   (loader-side: {@code Mob.serverAiStep} — sensing, goal and
+ *                   target selectors, navigation, brain/custom step, move/look/
+ *                   jump controls; exactly the universe WS-1 gating can widen
+ *                   into). 0 for non-mob work, and 0 for mobs whose class
+ *                   overrides the AI step without calling super (their cost
+ *                   conservatively counts as movement/physics). A passenger
+ *                   mob's AI slice accumulates into its vehicle's sample, the
+ *                   same way its total cost already does.
  */
-public record TickSample(Source source, String typeId, long chunkKey, long nanos, int aiInterval) {
+public record TickSample(Source source, String typeId, long chunkKey, long nanos, int aiInterval,
+                         long aiNanos) {
 
     public static final long NO_CHUNK = Long.MIN_VALUE;
 
     /** Work with no WS-1 throttle projection (interval 1 = full rate). */
     public TickSample(Source source, String typeId, long chunkKey, long nanos) {
-        this(source, typeId, chunkKey, nanos, 1);
+        this(source, typeId, chunkKey, nanos, 1, 0L);
+    }
+
+    /** Work with no measured AI slice (pre-sub-attribution callers, non-mobs). */
+    public TickSample(Source source, String typeId, long chunkKey, long nanos, int aiInterval) {
+        this(source, typeId, chunkKey, nanos, aiInterval, 0L);
     }
 
     public enum Source {

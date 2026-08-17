@@ -29,6 +29,17 @@ public final class ReportFormatter {
         sb.append(String.format("Parallelizable (region-attributable): %.1f%%\n", spatialPct));
         sb.append(String.format("Serial (global, no spatial home):     %.1f%%\n", globalPct));
 
+        // AI sub-attribution (WS-1 sizing): only printed once the AI-slice
+        // hook has produced data - a window of pure item/projectile traffic
+        // (or a loader without the Mob hook) legitimately has no AI slice,
+        // and "0.0% AI" would read as a measurement rather than absence.
+        if (r.entityAiNanos() > 0) {
+            sb.append(String.format(
+                    "Entity cost split: %.1f%% AI step vs %.1f%% movement/physics/other\n",
+                    pct(r.entityAiNanos(), r.entityNanos()),
+                    pct(r.entityNanos() - r.entityAiNanos(), r.entityNanos())));
+        }
+
         sb.append(String.format("Hypothetical regions: %d", r.regions().size()));
         if (!r.regions().isEmpty()) {
             RegionizabilityAnalyzer.RegionCost hottest = r.regions().get(0);
@@ -53,6 +64,12 @@ public final class ReportFormatter {
                     "  (%.1f%% of cost is mob AI the configured tiers would throttle; upper\n"
                     + "  bound - only the AI share of a throttled mob's tick is skipped)\n",
                     pct(r.throttleableNanos(), r.totalNanos())));
+            if (r.throttleableAiNanos() > 0) {
+                sb.append(String.format(
+                        "  Measured: widening WS-1 to gate the whole AI step is worth %.1f%%\n"
+                        + "  of attributed cost (throttled mobs' AI slice at assigned intervals)\n",
+                        pct(r.activationAiSavedNanos(), r.totalNanos())));
+            }
         }
 
         sb.append("Top cost sources:\n");

@@ -64,6 +64,11 @@ public final class TickProfiler {
         record(new TickSample(source, typeId, chunkKey, nanos, aiInterval));
     }
 
+    public void record(TickSample.Source source, String typeId, long chunkKey, long nanos,
+                       int aiInterval, long aiNanos) {
+        record(new TickSample(source, typeId, chunkKey, nanos, aiInterval, aiNanos));
+    }
+
     /** Copy of the completed-tick window, oldest first. Safe from any thread. */
     public List<TickRecord> snapshotWindow() {
         synchronized (windowLock) {

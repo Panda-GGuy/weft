@@ -101,6 +101,29 @@ class RegionizabilityAnalyzerTest {
     }
 
     @Test
+    void aiSliceSplitsEntityCostAndSizesWidenedGating() {
+        List<TickSample> samples = List.of(
+                // Near a player (interval 1): AI slice counts toward the
+                // entity split but never toward the widened projection.
+                new TickSample(TickSample.Source.ENTITY, "minecraft:cow",
+                        ChunkKey.pack(0, 0), 4_000_000, 1, 1_000_000),
+                // Throttled at 4: widened gating saves 3/4 of its 2ms AI slice.
+                new TickSample(TickSample.Source.ENTITY, "minecraft:cow",
+                        ChunkKey.pack(3, 0), 4_000_000, 4, 2_000_000),
+                // Block entities never contribute to the entity split.
+                new TickSample(TickSample.Source.BLOCK_ENTITY, "mod:machine",
+                        ChunkKey.pack(1, 0), 3_000_000));
+        RegionizabilityAnalyzer.Report r =
+                new RegionizabilityAnalyzer(2, new int[]{2}, 10).analyze(samples);
+
+        assertEquals(8_000_000, r.entityNanos(), "ENTITY-source cost only");
+        assertEquals(3_000_000, r.entityAiNanos());
+        assertEquals(2_000_000, r.throttleableAiNanos(), "interval>1 AI cost only");
+        assertEquals(1_500_000, r.activationAiSavedNanos(),
+                "aiNanos * (interval-1)/interval per throttleable sample");
+    }
+
+    @Test
     void legacySamplesProjectNoActivationSavings() {
         RegionizabilityAnalyzer.Report r = new RegionizabilityAnalyzer(2, new int[]{2}, 10)
                 .analyze(List.of(entity("mod:machine", 0, 0, 5_000_000)));

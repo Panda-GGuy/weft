@@ -113,7 +113,7 @@ public class WeftBenchGameTests {
         ActivationHooks.setActive(false);
 
         long[] phaseStartTick = new long[1];
-        double[] baselineMsPerTick = new double[1];
+        EntityPhase[] baseline = new EntityPhase[1];
 
         helper.onEachTick(() -> arena.bot().tickCircle(BOT_CIRCLE_RADIUS));
 
@@ -123,20 +123,38 @@ public class WeftBenchGameTests {
 
         // Phase B: activation scheduling on.
         helper.runAfterDelay(WARMUP_TICKS + PHASE_TICKS, () -> {
-            baselineMsPerTick[0] = entityPhaseMsPerTick(helper, phaseStartTick[0]);
+            baseline[0] = entityPhaseMsPerTick(helper, phaseStartTick[0]);
             ActivationHooks.setActive(true);
             phaseStartTick[0] = WeftProfiler.get().tickCounter();
         });
 
         helper.runAfterDelay(WARMUP_TICKS + 2 * PHASE_TICKS, () -> {
-            double activatedMsPerTick = entityPhaseMsPerTick(helper, phaseStartTick[0]);
+            EntityPhase activated = entityPhaseMsPerTick(helper, phaseStartTick[0]);
+            double baselineMsPerTick = baseline[0].totalMs();
+            double activatedMsPerTick = activated.totalMs();
             WeftConfig.PROFILE_WINDOW_TICKS = 100;
             arena.tearDown();
 
-            double reduction = 100.0 * (1.0 - activatedMsPerTick / baselineMsPerTick[0]);
+            double reduction = 100.0 * (1.0 - activatedMsPerTick / baselineMsPerTick);
             BenchRecorder.record(helper.getLevel().getServer(),
-                    "ws1_entity_phase_vanilla_ai", "ms/tick", baselineMsPerTick[0],
+                    "ws1_entity_phase_vanilla_ai", "ms/tick", baselineMsPerTick,
                     "activation scheduling OFF (baseline)");
+            // Sub-attribution (Part A of the WS-1 widening work): how much of
+            // the entity phase is AI step at all - the ceiling for any amount
+            // of WS-1 gating - tracked in both phases so the nightly trend
+            // shows what widening steps actually removed.
+            BenchRecorder.record(helper.getLevel().getServer(),
+                    "ws1_entity_phase_ai_slice_vanilla", "ms/tick", baseline[0].aiMs(),
+                    String.format(Locale.ROOT,
+                            "AI step (serverAiStep) = %.1f%% of the vanilla entity phase; "
+                                    + "the pool WS-1 gating can address",
+                            100.0 * baseline[0].aiMs() / baselineMsPerTick));
+            BenchRecorder.record(helper.getLevel().getServer(),
+                    "ws1_entity_phase_ai_slice_activated", "ms/tick", activated.aiMs(),
+                    String.format(Locale.ROOT,
+                            "AI step remaining with activation scheduling ON (%.1f%% of its "
+                                    + "entity phase)",
+                            100.0 * activated.aiMs() / activatedMsPerTick));
             BenchRecorder.record(helper.getLevel().getServer(),
                     "ws1_entity_phase_activation_scheduling", "ms/tick", activatedMsPerTick,
                     String.format(Locale.ROOT,
@@ -151,7 +169,7 @@ public class WeftBenchGameTests {
                         "WS-1 acceptance bar not met yet: %.1f%% entity-phase reduction < %.0f%% "
                                 + "(vanilla %.3f ms/tick, activated %.3f ms/tick)",
                         reduction, requiredReductionPct(),
-                        baselineMsPerTick[0], activatedMsPerTick));
+                        baselineMsPerTick, activatedMsPerTick));
             }
             helper.succeed();
         });
@@ -267,13 +285,18 @@ public class WeftBenchGameTests {
         }
     }
 
+    /** Mean per-tick entity-phase cost and its AI-step slice, in ms. */
+    record EntityPhase(double totalMs, double aiMs) {}
+
     /**
-     * Mean ENTITY-source nanos per tick over completed ticks after {@code
-     * startTickExclusive}, read from the P0 profiler's rolling window.
+     * Mean ENTITY-source nanos per tick (and the AI-step slice thereof) over
+     * completed ticks after {@code startTickExclusive}, read from the P0
+     * profiler's rolling window.
      */
-    private static double entityPhaseMsPerTick(GameTestHelper helper, long startTickExclusive) {
+    private static EntityPhase entityPhaseMsPerTick(GameTestHelper helper, long startTickExclusive) {
         long endInclusive = WeftProfiler.get().tickCounter() - 1;
         long nanos = 0;
+        long aiNanos = 0;
         int ticks = 0;
         for (TickProfiler.TickRecord record : WeftProfiler.get().snapshotWindow()) {
             if (record.tickNumber() > startTickExclusive && record.tickNumber() <= endInclusive) {
@@ -281,6 +304,7 @@ public class WeftBenchGameTests {
                 for (TickSample sample : record.samples()) {
                     if (sample.source() == TickSample.Source.ENTITY) {
                         nanos += sample.nanos();
+                        aiNanos += sample.aiNanos();
                     }
                 }
             }
@@ -289,6 +313,6 @@ public class WeftBenchGameTests {
             helper.fail("Profiler window only covered " + ticks + " of " + PHASE_TICKS
                     + " phase ticks - is profiling enabled and the window sized to the phase?");
         }
-        return nanos / 1_000_000.0 / ticks;
+        return new EntityPhase(nanos / 1_000_000.0 / ticks, aiNanos / 1_000_000.0 / ticks);
     }
 }

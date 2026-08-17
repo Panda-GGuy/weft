@@ -6,6 +6,7 @@
   "mixins": [
     "MinecraftServerMixin",
     "ServerLevelMixin",
+    "MobMixin",
     "BoundTickingBlockEntityMixin",
     "NaturalSpawnerMixin"
   ],

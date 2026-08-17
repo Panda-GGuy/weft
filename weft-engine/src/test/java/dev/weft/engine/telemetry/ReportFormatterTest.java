@@ -70,4 +70,25 @@ class ReportFormatterTest {
         assertTrue(with.contains("Projected WS-1 activation savings: up to 56.3%"), with);
         assertTrue(with.contains("75.0% of cost is mob AI"), with);
     }
+
+    @Test
+    void entitySplitAndWidenedProjectionAppearOnlyWithAiSliceData() {
+        String without = ReportFormatter.format(sampleReport(), 10);
+        assertFalse(without.contains("Entity cost split"),
+                "no AI-slice data -> absence, not a fake 0.0% measurement");
+        assertFalse(without.contains("widening WS-1"));
+
+        List<TickSample> samples = List.of(
+                new TickSample(TickSample.Source.ENTITY, "minecraft:cow",
+                        ChunkKey.pack(0, 0), 4_000_000, 4, 2_000_000),
+                new TickSample(TickSample.Source.GLOBAL, "global:time",
+                        TickSample.NO_CHUNK, 4_000_000));
+        String with = ReportFormatter.format(
+                new RegionizabilityAnalyzer(2, new int[]{2}, 5).analyze(samples), 10);
+        // entity 4ms with 2ms AI -> 50/50 split
+        assertTrue(with.contains(
+                "Entity cost split: 50.0% AI step vs 50.0% movement/physics/other"), with);
+        // widened saving = 2ms * 3/4 = 1.5ms of 8ms attributed = 18.8%
+        assertTrue(with.contains("worth 18.8%"), with);
+    }
 }

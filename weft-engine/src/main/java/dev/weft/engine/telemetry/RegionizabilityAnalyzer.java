@@ -43,11 +43,24 @@ public final class RegionizabilityAnalyzer {
      *                          {@code nanos * (interval - 1) / interval} — an
      *                          upper bound, since only the AI portion of an
      *                          entity tick is actually skipped
+     * @param entityNanos      total ENTITY-source cost (the entity phase)
+     * @param entityAiNanos    the AI-step slice of the entity phase (per-sample
+     *                         {@code aiNanos}); the rest is movement/physics
+     * @param throttleableAiNanos AI-step cost on throttleable samples — the
+     *                          pool a widened WS-1 gating could address at all
+     * @param activationAiSavedNanos projected saving if WS-1 gated the whole
+     *                          AI step: {@code aiNanos * (interval-1)/interval}
+     *                          per throttleable sample. Unlike
+     *                          {@code activationSavedNanos} this is measured,
+     *                          not an upper bound — it is the honest sizing of
+     *                          "what widening the gating is worth"
      */
     public record Report(long totalNanos, long spatialNanos, long globalNanos,
                          List<RegionCost> regions, List<TypeCost> topTypes,
                          Map<Integer, Double> speedupByWorkers,
-                         long throttleableNanos, long activationSavedNanos) {}
+                         long throttleableNanos, long activationSavedNanos,
+                         long entityNanos, long entityAiNanos,
+                         long throttleableAiNanos, long activationAiSavedNanos) {}
 
     private final int mergeDistance;
     private final int[] workerCounts;
@@ -64,6 +77,10 @@ public final class RegionizabilityAnalyzer {
         long global = 0;
         long throttleable = 0;
         long activationSaved = 0;
+        long entity = 0;
+        long entityAi = 0;
+        long throttleableAi = 0;
+        long activationAiSaved = 0;
 
         // Partition the sampled chunks exactly as the engine would.
         RegionManager rm = new RegionManager(mergeDistance, 0L);
@@ -75,9 +92,15 @@ public final class RegionizabilityAnalyzer {
             long[] agg = byType.get(s.typeId());
             agg[0] += s.nanos();
             agg[1]++;
+            if (s.source() == TickSample.Source.ENTITY) {
+                entity += s.nanos();
+                entityAi += s.aiNanos();
+            }
             if (s.aiInterval() > 1) {
                 throttleable += s.nanos();
                 activationSaved += s.nanos() * (s.aiInterval() - 1L) / s.aiInterval();
+                throttleableAi += s.aiNanos();
+                activationAiSaved += s.aiNanos() * (s.aiInterval() - 1L) / s.aiInterval();
             }
             if (s.spatial()) {
                 spatial += s.nanos();
@@ -119,7 +142,8 @@ public final class RegionizabilityAnalyzer {
         }
 
         return new Report(total, spatial, global, List.copyOf(regions), trimmedTypes,
-                Map.copyOf(speedups), throttleable, activationSaved);
+                Map.copyOf(speedups), throttleable, activationSaved,
+                entity, entityAi, throttleableAi, activationAiSaved);
     }
 
     /** Makespan of scheduling region costs onto k workers, LPT heuristic. */
