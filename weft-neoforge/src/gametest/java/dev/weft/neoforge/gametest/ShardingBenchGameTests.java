@@ -49,16 +49,73 @@ import java.util.Locale;
  * machine teaches people to ignore the suite. The engagement guard below is
  * a hard failure though — a run where sharding never fanned out would report
  * a meaningless 1.00x and must not be recorded as if it meant something.
+ *
+ * <h2>DO NOT QUOTE A SPEEDUP FROM THIS YET</h2>
+ *
+ * <p>As of 2026-08-17 this instrument is <b>not trustworthy enough for a
+ * headline number</b>, and the measurements say so plainly. Six runs, all
+ * same-run A/B on one machine:
+ *
+ * <pre>
+ *   400 BE, short warmup   2.048 → 1.288   1.59x     &lt;- warmup artifact
+ *   400 BE, short warmup   1.300 → 1.264   1.03x
+ *   400 BE, both warm      0.850 → 0.700   1.21x
+ *   400 BE, both warm      0.573 → 0.672   0.85x     &lt;- slower!
+ *  1600 BE, both warm      0.915 → 0.696   1.31x
+ *  1600 BE, both warm      0.690 → 0.649   1.06x
+ * </pre>
+ *
+ * <p>Two things are worth reading out of that table. First, the original
+ * 1.59x was a <em>warmup artifact</em>: phase A ran cold and paid JIT costs
+ * phase B inherited the benefit of. Same-run A/B removes cross-run variance
+ * but not warmup-order bias, which is why both paths are now warmed before
+ * either is measured. Second, even after that fix the ratio does not
+ * reproduce — it spans 0.85x to 1.31x — because the <em>serial baseline</em>
+ * is noisy (0.573–2.048 ms) while the sharded figure is strikingly stable
+ * (0.649–0.700 ms across every configuration).
+ *
+ * <p>The stable half is itself the most defensible observation available: the
+ * sharded path lands at ~0.65–0.70 ms with a consistently lower p95 than
+ * serial, which is the spike-flattening the coloured-pass design predicts.
+ * But "sharding reduces tail latency on this rig" is a much weaker claim than
+ * a speedup multiple, and it is the only one the data currently supports.
+ *
+ * <p>To make this quotable, the next attempt should stop measuring
+ * <em>full-tick</em> MSPT — at these workloads the block-entity section is a
+ * small fraction of a tick that is mostly other things, so the signal is
+ * swamped — and instead time the block-entity section directly, sampled over
+ * interleaved A/B/A/B windows so drift cancels rather than accumulates.
  */
 @GameTestHolder("weft")
 @PrefixGameTestTemplate(false)
 public class ShardingBenchGameTests {
 
-    private static final int WARMUP_TICKS = 60;
+    /**
+     * Both code paths are warmed <em>before</em> either is measured.
+     *
+     * <p>The first version of this benchmark warmed only briefly and then
+     * measured serial-then-sharded, and reported 1.59x. It did not reproduce:
+     * a second run gave 1.03x, because the sharded figure was stable
+     * (1.288 → 1.264 ms) while the <em>serial baseline</em> collapsed
+     * (2.048 → 1.300 ms). Phase A had been paying JIT and first-touch costs
+     * that phase B then inherited the benefit of — a same-run A/B removes
+     * cross-run variance but not warmup order bias. So both paths now run
+     * warm before the clock starts on either.
+     */
+    private static final int WARMUP_TICKS = 150;
     private static final int PHASE_TICKS = 300;
-    /** Rig chunks per axis. 10x10 = 100 chunks, 25 per colour. */
-    private static final int GRID = 10;
-    /** Hopper stacks per chunk — 400 ticking block entities total. */
+    /**
+     * Rig chunks per axis. 20x20 = 400 chunks, 100 per colour, 1600 ticking
+     * block entities.
+     *
+     * <p>Sized up from 10x10 because 400 hoppers produced sub-millisecond
+     * ticks where measurement noise swamped the effect: across four runs the
+     * serial baseline ranged 0.57–2.05 ms and the "speedup" ranged 0.85x to
+     * 1.59x — i.e. the instrument could not tell a win from a loss. A
+     * benchmark that cannot distinguish those must not be quoted.
+     */
+    private static final int GRID = 20;
+    /** Hopper stacks per chunk — 1600 ticking block entities total. */
     private static final int[][] STACK_OFFSETS = {{4, 4}, {4, 12}, {12, 4}, {12, 12}};
     private static final int STACK = 64;
 
@@ -94,11 +151,18 @@ public class ShardingBenchGameTests {
             RegionizedTicking.setBlockEntitySharding(false);
         });
 
-        // Phase A: serial per-region block-entity ticking.
-        helper.runAfterDelay(WARMUP_TICKS, () -> phaseStart[0] = WeftProfiler.get().tickCounter());
+        // Warm the SHARDED path too, before measuring anything.
+        helper.runAfterDelay(WARMUP_TICKS,
+                () -> RegionizedTicking.setBlockEntitySharding(true));
+
+        // Both paths warm. Phase A: serial per-region block-entity ticking.
+        helper.runAfterDelay(2 * WARMUP_TICKS, () -> {
+            RegionizedTicking.setBlockEntitySharding(false);
+            phaseStart[0] = WeftProfiler.get().tickCounter();
+        });
 
         // Phase B: same rig, sharding on.
-        helper.runAfterDelay(WARMUP_TICKS + PHASE_TICKS, () -> {
+        helper.runAfterDelay(2 * WARMUP_TICKS + PHASE_TICKS, () -> {
             double[] mspt = WeftBenchGameTests.msptMsPerTick(helper, phaseStart[0]);
             serial[0] = mspt[0];
             serial[1] = mspt[1];
@@ -108,7 +172,7 @@ public class ShardingBenchGameTests {
             phaseStart[0] = WeftProfiler.get().tickCounter();
         });
 
-        helper.runAfterDelay(WARMUP_TICKS + 2 * PHASE_TICKS, () -> {
+        helper.runAfterDelay(2 * WARMUP_TICKS + 2 * PHASE_TICKS, () -> {
             double[] sharded = WeftBenchGameTests.msptMsPerTick(helper, phaseStart[0]);
             long passes = RegionizedTicking.shardPasses() - baselines[0];
             long units = RegionizedTicking.shardedUnits() - baselines[1];
