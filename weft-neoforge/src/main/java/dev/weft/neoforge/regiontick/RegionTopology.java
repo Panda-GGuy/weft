@@ -35,9 +35,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *
  * <p>Always-on by design: this is pure bookkeeping (a map update per chunk
  * load/unload — the nightly {@code loadgen_fresh_chunk_load} trend guards the
- * cost), and gating it behind {@code regionizedTicking} would leave the
- * mapping blind to chunks loaded while the flag was off. Tick <em>ownership</em>
- * stays gated by the module flag ({@link RegionizedTicking}).
+ * steady-load cost, and {@code RegionChurnStormBench} plus
+ * {@code RegionChurnTest} guard sustained load/unload churn, the pregen shape
+ * that regressed Chunky by ~20 cps before splits were scoped to removals
+ * that can actually disconnect), and gating it behind {@code regionizedTicking}
+ * would leave the mapping blind to chunks loaded while the flag was off. Tick
+ * <em>ownership</em> stays gated by the module flag ({@link RegionizedTicking}).
  *
  * <p>Thread discipline: all mutations happen on the server thread — chunk
  * events that arrive off-thread are posted through the scheduler's inbox and
@@ -53,7 +56,12 @@ public final class RegionTopology {
     private static final ConcurrentHashMap<ServerLevel, AtomicBoolean> splitDirty =
             new ConcurrentHashMap<>();
 
-    /** Recompute splits at most every N ticks per level (BFS over all chunks). */
+    /**
+     * Recompute splits at most every N ticks per level. The recompute only
+     * BFS-walks regions a removal may actually have disconnected (the manager
+     * proves most removals can't split anything), so under pregen churn this
+     * is a no-op, not a whole-map walk.
+     */
     private static final int SPLIT_RECOMPUTE_INTERVAL_TICKS = 20;
 
     public static void onChunkLoad(ChunkEvent.Load event) {
