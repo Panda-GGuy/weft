@@ -72,9 +72,23 @@ class LegacyLaneTest {
         assertThrows(IllegalStateException.class, lane::runTick);
         assertEquals(1L, lane.unitsByMod().get("crashmod"),
                 "the crashing unit is still attributed (the crash report names the mod)");
-        // Vanilla semantics: the crash propagates; the remaining unit stays
-        // queued (the server is going down anyway).
-        assertEquals(1, lane.pending());
+        // Vanilla semantics: the crash propagates; the rest of the drained
+        // pass is dropped (the server is going down anyway).
+        assertEquals(0, lane.pending());
+    }
+
+    @Test
+    void drainOrdersByRegionThenSubmission() {
+        LegacyLane lane = new LegacyLane();
+        StringBuilder order = new StringBuilder();
+        // Submissions arrive interleaved across regions (as parallel buckets
+        // would produce); the drain must impose (region, submission) order.
+        lane.submit("m", 7, () -> order.append("b1"));
+        lane.submit("m", 3, () -> order.append("a1"));
+        lane.submit("m", 7, () -> order.append("b2"));
+        lane.submit("m", 3, () -> order.append("a2"));
+        assertEquals(4, lane.runTick());
+        assertEquals("a1a2b1b2", order.toString());
     }
 
     @Test

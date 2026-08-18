@@ -159,6 +159,119 @@ public class PartitionedTickingGameTests {
         });
     }
 
+    /**
+     * P2 increment-5 gate (RFC-0006, class E1): same two-island rig, but the
+     * buckets run CONCURRENTLY on engine workers. Asserts everything the
+     * partition gate asserts — distinct real region ids in both probes,
+     * per-island end states bit-identical to an inline control at equal tick
+     * counts, zero unmapped units — plus the fan-out proof: every bucket of
+     * the final section executed off the server thread. Bit-identical end
+     * states under real concurrency is the E1 claim made concrete: per-region
+     * execution is untouched by parallelism; only cross-region interleaving
+     * (unobservable here by construction) changed.
+     */
+    @GameTest(template = "empty", batch = "p2parallel", timeoutTicks = 1600)
+    public void parallelTickingIndependentIslands(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        BlockPos ground = WeftBenchGameTests.groundOrigin(helper);
+        BlockPos columnA = new BlockPos(ground.getX() - 64, 0, ground.getZ() + 64);
+        BlockPos columnB = new BlockPos(columnA.getX(), 0,
+                columnA.getZ() + ISLAND_GAP_CHUNKS * 16);
+        WeftBenchGameTests.forceChunks(level, columnA, true);
+        WeftBenchGameTests.forceChunks(level, columnB, true);
+        BlockPos baseA = surfaceBase(level, columnA);
+        BlockPos baseB = surfaceBase(level, columnB);
+
+        ActivationHooks.setActive(false);
+        PathfindingHooks.setActive(false);
+        SpawnDensityHooks.setActive(false);
+        RegionizedTicking.setActive(false);
+        LegacyRouting.setActive(false);
+
+        AtomicReference<String> controlA = new AtomicReference<>();
+        AtomicReference<String> controlB = new AtomicReference<>();
+        long[] baselines = new long[2];
+
+        helper.runAfterDelay(SETTLE_TICKS, () -> {
+            buildIsland(level, baseA);
+            buildIsland(level, baseB);
+        });
+
+        helper.runAfterDelay(SETTLE_TICKS + RUN_TICKS + 1, () -> {
+            controlA.set(furnaceDigest(level, furnacePos(baseA)));
+            controlB.set(furnaceDigest(level, furnacePos(baseB)));
+            demolishIsland(level, baseA);
+            demolishIsland(level, baseB);
+            buildIsland(level, baseA);
+            buildIsland(level, baseB);
+            baselines[0] = RegionizedTicking.partitionedSections();
+            baselines[1] = RegionizedTicking.unmappedUnits();
+            RegionizedTicking.setActive(true);
+            RegionizedTicking.setPartitioned(true);
+            RegionizedTicking.setParallel(true);
+        });
+
+        helper.runAfterDelay(SETTLE_TICKS + 2 * RUN_TICKS + 2, () -> {
+            String laneA = furnaceDigest(level, furnacePos(baseA));
+            String laneB = furnaceDigest(level, furnacePos(baseB));
+            long regionA = regionIdAt(level, baseA);
+            long regionB = regionIdAt(level, baseB);
+            long[] entityPartition = RegionizedTicking.lastEntityPartition();
+            long[] bePartition = RegionizedTicking.lastBlockEntityPartition();
+            String[] bucketThreads = RegionizedTicking.lastEntityPartitionThreads();
+            String serverThread = level.getServer().getRunningThread().getName();
+            long partitionedSections = RegionizedTicking.partitionedSections() - baselines[0];
+            long unmapped = RegionizedTicking.unmappedUnits() - baselines[1];
+            tearDown(level, baseA, baseB);
+
+            if (regionA < 0 || regionB < 0 || regionA == regionB) {
+                helper.fail("Island regions unusable for the parallel gate: A=" + regionA
+                        + " B=" + regionB);
+            }
+            if (!contains(entityPartition, regionA) || !contains(entityPartition, regionB)
+                    || !contains(bePartition, regionA) || !contains(bePartition, regionB)) {
+                helper.fail("Partition probes missing an island region under parallel mode: "
+                        + "entity=" + Arrays.toString(entityPartition)
+                        + " be=" + Arrays.toString(bePartition)
+                        + " A=" + regionA + " B=" + regionB);
+            }
+            // The fan-out proof: >=2 buckets, all executed on pool workers.
+            if (bucketThreads.length < 2) {
+                helper.fail("Parallel section had " + bucketThreads.length
+                        + " buckets - fan-out never engaged");
+            }
+            for (String thread : bucketThreads) {
+                if (thread == null || thread.equals(serverThread)) {
+                    helper.fail("A parallel bucket ran on the server thread (" + thread
+                            + ") - fan-out did not actually parallelize: "
+                            + Arrays.toString(bucketThreads));
+                }
+            }
+            if (partitionedSections < 2L * (RUN_TICKS - 16)) {
+                helper.fail("Vacuous parallel run: only " + partitionedSections
+                        + " partitioned sections across " + RUN_TICKS + " ticks");
+            }
+            if (unmapped != 0) {
+                helper.fail("Partitioner leaked " + unmapped
+                        + " units into the unmapped tail under parallel mode");
+            }
+            if (!laneA.contains("minecraft:iron_ingot") || !laneB.contains("minecraft:iron_ingot")) {
+                helper.fail("A parallel furnace produced no output - the buckets did not really "
+                        + "run.\nA: " + laneA + "\nB: " + laneB);
+            }
+            if (!laneA.equals(controlA.get())) {
+                helper.fail("E1 EQUIVALENCE FAILURE on island A: concurrent bucket execution "
+                        + "changed an independent island's end state.\ncontrol: "
+                        + controlA.get() + "\nparallel: " + laneA);
+            }
+            if (!laneB.equals(controlB.get())) {
+                helper.fail("E1 EQUIVALENCE FAILURE on island B.\ncontrol: "
+                        + controlB.get() + "\nparallel: " + laneB);
+            }
+            helper.succeed();
+        });
+    }
+
     private static BlockPos surfaceBase(ServerLevel level, BlockPos column) {
         return new BlockPos(column.getX(),
                 level.getHeight(Heightmap.Types.MOTION_BLOCKING, column.getX(), column.getZ()),

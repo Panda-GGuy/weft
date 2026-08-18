@@ -488,11 +488,20 @@ gated by the parity suite (partitioning active on the single-region
 arena, engagement + zero-unmapped guards, still bit-identical) plus the
 p2partition two-island gametest (distinct real region ids in both
 partition probes, per-island bit-identical end states vs. inline
-control). Next: parallel regions proper — worker fan-out + the
-shared-structure audit (entity-section storage, cross-region teleports,
-level.random, packets) + owner-mail rerouting (E1), then WS-10
-activation (E2) — each gated by the parity suite at its declared
-equivalence class.
+control). Increment 5 (same day): parallel regions behind
+`parallelRegions` — buckets run concurrently on engine workers,
+barriered inside each vanilla section, after the RFC-0006
+shared-structure audit closed every verified hazard (worker chunk-read
+path replacing the deadlocking main-thread trap, thread-safe level
+RNG swap, surgical locks on the spawn/death/move registries,
+thread-local neighbor-update chains, deferred mid-tick dimension
+changes, deterministic legacy-lane ordering); gated by the parity
+anchor with all increments active plus the p2parallel gametest
+(every bucket off the server thread, per-island end states
+bit-identical to inline control — the E1 claim concrete). Remaining
+before default-ON: free-running regions (true owner-mail rerouting),
+WS-10 activation inside big regions (E2), and the soak matrix under
+the flag.
 
 ## 12. Risk register (top items)
 

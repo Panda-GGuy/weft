@@ -68,6 +68,7 @@ public final class RegionizedTicking {
 
     private static volatile boolean active;
     private static volatile boolean partitioned;
+    private static volatile boolean parallel;
 
     /** One reserved engine owner id per live ServerLevel (increment 1's "one region"). */
     private static final ConcurrentHashMap<ServerLevel, Long> ownerIds = new ConcurrentHashMap<>();
@@ -80,6 +81,16 @@ public final class RegionizedTicking {
     /** Region ids of the most recent partitioned sections (gametest probes). */
     private static volatile long[] lastEntityPartition = new long[0];
     private static volatile long[] lastBlockEntityPartition = new long[0];
+    /** Thread names per bucket of the most recent entity section (E1 probe). */
+    private static volatile String[] lastEntityPartitionThreads = new String[0];
+
+    /**
+     * Work deferred by a region worker to the end of the current section
+     * (RFC-0006 hazard 14: mid-tick dimension changes). Drained on the
+     * server thread right after the barrier, same tick.
+     */
+    private static final java.util.concurrent.ConcurrentLinkedQueue<Runnable> sectionEndTasks =
+            new java.util.concurrent.ConcurrentLinkedQueue<>();
 
     // Block-entity capture state. Server-thread only: sections run on the
     // server thread and levels tick sequentially, so one static slot is
@@ -98,6 +109,7 @@ public final class RegionizedTicking {
     public static void applyActive(boolean value) {
         active = value;
         partitioned = value && WeftConfig.PARTITIONED_TICKING;
+        parallel = partitioned && WeftConfig.PARALLEL_REGIONS;
     }
 
     /** Direct switch for tests (parity/partition gametests drive runs). */
@@ -105,12 +117,21 @@ public final class RegionizedTicking {
         active = value;
         if (!value) {
             partitioned = false;
+            parallel = false;
         }
     }
 
     /** Direct switch for tests; production resolution goes via applyActive. */
     public static void setPartitioned(boolean value) {
         partitioned = value && active;
+        if (!partitioned) {
+            parallel = false;
+        }
+    }
+
+    /** Direct switch for tests; production resolution goes via applyActive. */
+    public static void setParallel(boolean value) {
+        parallel = value && partitioned;
     }
 
     public static boolean isActive() {
@@ -122,6 +143,8 @@ public final class RegionizedTicking {
         ownerIds.clear();
         lastEntityPartition = new long[0];
         lastBlockEntityPartition = new long[0];
+        lastEntityPartitionThreads = new String[0];
+        sectionEndTasks.clear();
     }
 
     /**
@@ -161,15 +184,17 @@ public final class RegionizedTicking {
         }));
 
         long[] partition = new long[buckets.size()];
+        List<WeftScheduler.OwnedSection> sections = new ArrayList<>(buckets.size());
         int i = 0;
         for (var bucket : buckets.entrySet()) {
             partition[i++] = bucket.getKey();
-            engine.runOwnedSerial(bucket.getKey(), () -> {
+            sections.add(new WeftScheduler.OwnedSection(bucket.getKey(), () -> {
                 for (Entity entity : bucket.getValue()) {
                     ticker.accept(entity);
                 }
-            });
+            }));
         }
+        String[] threads = runBuckets(engine, sections);
         if (!tail.isEmpty()) {
             unmappedUnits.add(tail.size());
             engine.runOwnedSerial(ownerId(level), () -> {
@@ -178,8 +203,10 @@ public final class RegionizedTicking {
                 }
             });
         }
+        drainSectionEndTasks();
         partitionedSections.increment();
         lastEntityPartition = partition;
+        lastEntityPartitionThreads = threads;
     }
 
     /**
@@ -215,17 +242,73 @@ public final class RegionizedTicking {
         }
 
         long[] partition = new long[buckets.size()];
+        List<WeftScheduler.OwnedSection> sections = new ArrayList<>(buckets.size());
         int i = 0;
         for (var bucket : buckets.entrySet()) {
             partition[i++] = bucket.getKey();
-            engine.runOwnedSerial(bucket.getKey(), () -> bucket.getValue().forEach(Runnable::run));
+            sections.add(new WeftScheduler.OwnedSection(bucket.getKey(),
+                    () -> bucket.getValue().forEach(Runnable::run)));
         }
+        runBuckets(engine, sections);
         if (!tail.isEmpty()) {
             unmappedUnits.add(tail.size());
             engine.runOwnedSerial(ownerId(level), () -> tail.forEach(Runnable::run));
         }
+        drainSectionEndTasks();
         partitionedSections.increment();
         lastBlockEntityPartition = partition;
+    }
+
+    /**
+     * Execute one section's buckets: fanned out on the engine pool when
+     * parallel mode is on and there are ≥2 buckets (RFC-0006 §2 — the
+     * server thread barriers here), otherwise increment-4 serial on the
+     * calling thread. Region workers are flagged via {@link ParallelAccess}
+     * so the safety mixins engage only inside buckets. Returns the thread
+     * name each bucket ran on (E1 gametest probe).
+     */
+    private static String[] runBuckets(WeftScheduler engine,
+                                       List<WeftScheduler.OwnedSection> sections) {
+        String[] threads = new String[sections.size()];
+        if (parallel && sections.size() >= 2) {
+            List<WeftScheduler.OwnedSection> wrapped = new ArrayList<>(sections.size());
+            for (int i = 0; i < sections.size(); i++) {
+                final int index = i;
+                WeftScheduler.OwnedSection section = sections.get(i);
+                wrapped.add(new WeftScheduler.OwnedSection(section.ownerId(), () -> {
+                    threads[index] = Thread.currentThread().getName();
+                    ParallelAccess.enterWorker();
+                    try {
+                        section.work().run();
+                    } finally {
+                        ParallelAccess.exitWorker();
+                    }
+                }));
+            }
+            engine.runOwnedParallel(wrapped);
+        } else {
+            for (int i = 0; i < sections.size(); i++) {
+                threads[i] = Thread.currentThread().getName();
+                WeftScheduler.OwnedSection section = sections.get(i);
+                engine.runOwnedSerial(section.ownerId(), section.work());
+            }
+        }
+        return threads;
+    }
+
+    /**
+     * Queue work to run on the server thread right after the current
+     * section's barrier (worker-context dimension changes, RFC-0006 §3 #14).
+     */
+    public static void deferToSectionEnd(Runnable task) {
+        sectionEndTasks.add(task);
+    }
+
+    private static void drainSectionEndTasks() {
+        Runnable task;
+        while ((task = sectionEndTasks.poll()) != null) {
+            task.run();
+        }
     }
 
     /**
@@ -281,6 +364,11 @@ public final class RegionizedTicking {
         return lastBlockEntityPartition.clone();
     }
 
+    /** Thread names per bucket of the most recent entity section (E1 probe). */
+    public static String[] lastEntityPartitionThreads() {
+        return lastEntityPartitionThreads.clone();
+    }
+
     /** Extra detail for the posture report / {@code /weft status} (R5). */
     public static String statusDetail() {
         long e = entitySections.sum();
@@ -289,9 +377,10 @@ public final class RegionizedTicking {
                 ? "no sections owned yet"
                 : String.format("%d entity + %d block-entity sections owned", e, b);
         String mode = partitioned
-                ? String.format("increment 4 partitioned ticking (per-region buckets, serial, "
-                        + "canonical order; %d partitioned sections, %d unmapped units, "
-                        + "last partition %d regions)",
+                ? String.format("increment %s ticking (per-region buckets, canonical order, %s; "
+                        + "%d partitioned sections, %d unmapped units, last partition %d regions)",
+                        parallel ? "5 parallel" : "4 partitioned",
+                        parallel ? "fan-out at >=2 buckets" : "serial",
                         partitionedSections.sum(), unmappedUnits.sum(), lastEntityPartition.length)
                 : "increment 1 ticking (whole level, serial, server thread)";
         return mode + ": " + sections + "; " + RegionTopology.summary();

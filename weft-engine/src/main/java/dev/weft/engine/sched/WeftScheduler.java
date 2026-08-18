@@ -123,6 +123,47 @@ public final class WeftScheduler implements AutoCloseable {
         return ownedSerialSections.sum();
     }
 
+    /** One owned unit of a fanned-out section (P2 E1, RFC-0006 §2). */
+    public record OwnedSection(long ownerId, Runnable work) {}
+
+    private final LongAdder ownedParallelSections = new LongAdder();
+
+    /**
+     * Run the buckets of one vanilla tick section concurrently on the engine
+     * pool — each under a {@link ThreadContext.Kind#REGION} context for its
+     * own owner id — and barrier until all complete (RFC-0006 §2: fan-out
+     * happens <em>inside</em> the vanilla section; the caller, the server
+     * thread, owns everything again the moment this returns). A failed
+     * bucket propagates as an IllegalStateException carrying the cause: a
+     * crashing tick crashes the server, exactly as serially.
+     */
+    public void runOwnedParallel(List<OwnedSection> sections) {
+        List<Future<?>> futures = new ArrayList<>(sections.size());
+        for (OwnedSection section : sections) {
+            futures.add(pool.submit(() -> {
+                ThreadContext.enter(ThreadContext.Kind.REGION, section.ownerId());
+                try {
+                    section.work().run();
+                } finally {
+                    ThreadContext.exit();
+                }
+            }));
+        }
+        try {
+            awaitAll(futures);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted awaiting a parallel tick section", e);
+        } finally {
+            ownedParallelSections.add(sections.size());
+        }
+    }
+
+    /** Buckets run through {@link #runOwnedParallel} since boot. */
+    public long ownedParallelSections() {
+        return ownedParallelSections.sum();
+    }
+
     /** Entry point for cross-thread submissions (network threads, console). */
     public void submit(Message message) {
         globalInbox.post(message);

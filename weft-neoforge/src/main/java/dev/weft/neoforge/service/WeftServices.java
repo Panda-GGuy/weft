@@ -108,29 +108,46 @@ public final class WeftServices implements AutoCloseable {
         return byLevel.computeIfAbsent(level.dimension().location().toString(), LevelServices::new);
     }
 
-    // --- census event feed (server thread; drift-measurement mode) ---
+    // --- census event feed (owner thread; drift-measurement mode) ---
+    // P2 E1: with parallel region buckets these events also fire on region
+    // workers (spawns/removals/section moves happen inside entity ticks).
+    // EntityCensus is owner-thread-only by contract, so off-thread events
+    // capture their values eagerly and post the mutation to the next INGEST
+    // (server thread). The one-tick lag is within the census's tolerance —
+    // it is drift-measured and reconciled by design.
 
     public void onEntityJoin(EntityJoinLevelEvent event) {
         if (SpawnDensityHooks.moduleActive() && event.getLevel() instanceof ServerLevel level) {
             MobCategory category = capCategoryOf(event.getEntity());
             if (category != null) {
-                servicesOf(level).census.add(event.getEntity().getId(), category.ordinal(),
-                        event.getEntity().chunkPosition().toLong());
+                int id = event.getEntity().getId();
+                long chunk = event.getEntity().chunkPosition().toLong();
+                onOwner(level, () -> servicesOf(level).census.add(id, category.ordinal(), chunk));
             }
         }
     }
 
     public void onEntityLeave(EntityLeaveLevelEvent event) {
         if (SpawnDensityHooks.moduleActive() && event.getLevel() instanceof ServerLevel level) {
-            servicesOf(level).census.remove(event.getEntity().getId());
+            int id = event.getEntity().getId();
+            onOwner(level, () -> servicesOf(level).census.remove(id));
         }
     }
 
     public void onEnteringSection(EntityEvent.EnteringSection event) {
         if (SpawnDensityHooks.moduleActive() && event.didChunkChange()
                 && event.getEntity().level() instanceof ServerLevel level) {
-            servicesOf(level).census.move(event.getEntity().getId(),
-                    event.getNewPos().chunk().toLong());
+            int id = event.getEntity().getId();
+            long chunk = event.getNewPos().chunk().toLong();
+            onOwner(level, () -> servicesOf(level).census.move(id, chunk));
+        }
+    }
+
+    private static void onOwner(ServerLevel level, Runnable mutation) {
+        if (level.getServer().isSameThread()) {
+            mutation.run();
+        } else {
+            dev.weft.neoforge.WeftMod.postToOwner(mutation);
         }
     }
 

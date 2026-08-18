@@ -41,10 +41,12 @@ import java.util.concurrent.atomic.LongAdder;
  */
 public final class LegacyLane {
 
-    private record Entry(String sourceModId, Runnable work) {}
+    private record Entry(String sourceModId, long regionOrder, long seq, Runnable work) {}
 
     private final List<Entry> registered = new ArrayList<>();
     private final ConcurrentLinkedQueue<Entry> submitted = new ConcurrentLinkedQueue<>();
+    private final java.util.concurrent.atomic.AtomicLong submitSeq =
+            new java.util.concurrent.atomic.AtomicLong();
     private final ConcurrentHashMap<String, LongAdder> nanosByMod = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, LongAdder> unitsByMod = new ConcurrentHashMap<>();
     private final LongAdder unitsRun = new LongAdder();
@@ -52,12 +54,23 @@ public final class LegacyLane {
 
     /** Recurring work, attached at load/attach time, before ticking starts. */
     public synchronized void register(String sourceModId, Runnable work) {
-        registered.add(new Entry(sourceModId, work));
+        registered.add(new Entry(sourceModId, 0, registered.size(), work));
     }
 
     /** One-shot tick work extracted from a vanilla section; runs next drain. */
     public void submit(String sourceModId, Runnable work) {
-        submitted.add(new Entry(sourceModId, work));
+        submit(sourceModId, 0, work);
+    }
+
+    /**
+     * One-shot with an explicit ordering group (P2 E1, RFC-0006 hazard 16):
+     * parallel region buckets submit concurrently, so FIFO alone is
+     * scheduling-dependent. The drain sorts by (regionOrder, submission
+     * seq) — within a region the single bucket thread keeps vanilla order,
+     * across regions the canonical region order rules, deterministically.
+     */
+    public void submit(String sourceModId, long regionOrder, Runnable work) {
+        submitted.add(new Entry(sourceModId, regionOrder, submitSeq.getAndIncrement(), work));
     }
 
     /**
@@ -78,13 +91,21 @@ public final class LegacyLane {
                 }
             }
             // Snapshot the count first: units submitted while draining belong
-            // to the next tick's pass.
+            // to the next tick's pass. Then order deterministically: within a
+            // region, submission order (vanilla iteration order); across
+            // regions, canonical region order (RFC-0006 hazard 16).
             int oneShots = submitted.size();
+            List<Entry> pass = new ArrayList<>(oneShots);
             for (int i = 0; i < oneShots; i++) {
                 Entry e = submitted.poll();
                 if (e == null) {
                     break;
                 }
+                pass.add(e);
+            }
+            pass.sort(java.util.Comparator.comparingLong(Entry::regionOrder)
+                    .thenComparingLong(Entry::seq));
+            for (Entry e : pass) {
                 runAttributed(e);
                 units++;
             }

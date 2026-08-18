@@ -216,6 +216,39 @@ sends — plus owner-mail rerouting; serial partitioning has none of those
 hazards by construction and exists so the partition seam is proven before
 threads arrive.
 
+**P2 increment 5 — parallel regions** (2026-08-17, same day): the buckets
+now run **concurrently on engine workers** behind `parallelRegions`
+(default OFF, requires `partitionedTicking`), barriered inside each vanilla
+tick section — the server thread waits, vanilla macro-order is unchanged,
+and single-bucket sections (solo play) take the serial path untouched. This
+shipped only after the **shared-structure audit**
+([RFC-0006](docs/RFC-0006-parallel-region-execution.md)) verified every
+hazard against the decompiled 1.21.1 sources and closed each one: the
+`getChunk` main-thread trap that would deadlock against the barrier (worker
+reads go through the visible-chunk-map snapshot, bypassing the racy 4-slot
+cache; unloaded access **fails loud** — ticket rings make it unreachable),
+`level.random`'s ThreadingDetector hard-crash (server levels swap to
+`ThreadSafeLegacyRandomSource` — identical LCG, identical single-threaded
+sequence, worldgen-proven), the plain-collection registries mutated on
+every spawn/death/section-move (tick list, id/uuid lookup, section index,
+tracker map — surgical locks; per-section multimaps stay lock-free because
+queries cannot reach across a ≥ mergeDistance gap), per-level neighbor-update
+chains (thread-local collectors per worker), the sub-tick ordering counter,
+BE-ticker list adds, and mid-tick `changeDimension` (worker calls defer to a
+post-barrier queue, same tick). The legacy lane's drain now orders by
+(region, submission) so Tier-2 extraction stays deterministic under
+concurrent submitters, and Weft's own census events route to the owner
+thread. Gates: the E0 parity anchor runs with **all five increments
+active** (single-region arena → serial fast path, zero residue), and the
+new `p2parallel` hard gametest proves the E1 claim concrete — two islands,
+**every bucket of the final section executed off the server thread**
+(thread-name probe), per-island end states **bit-identical** to the inline
+control. Honest scoping: barriered fan-out means async-service mail keeps
+applying at INGEST (with the main thread parked, global-inbox delivery *is*
+owner delivery); free-running regions with true mailbox rerouting, WS-10
+compounding inside big regions, and the long-tail soak (Create/AE2, chaos,
+R7 under the flag) are what stand between this and default-ON.
+
 **RFC-0002/0003 workstreams started** (2026-08-16): every Weft optimization
 module now walks the [RFC-0003](docs/RFC-0003-coexistence-policy.md)
 coexistence ladder at startup — independent kill switch, known-neighbor
