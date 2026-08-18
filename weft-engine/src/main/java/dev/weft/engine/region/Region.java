@@ -4,10 +4,11 @@ import dev.weft.engine.mail.Mailbox;
 import dev.weft.engine.mail.Message;
 
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
+import java.util.NavigableSet;
 import java.util.Set;
 import java.util.SplittableRandom;
+import java.util.TreeSet;
 
 /**
  * One unit of parallel world simulation: a connected set of loaded chunks and
@@ -33,7 +34,10 @@ public final class Region {
     }
 
     private final long id;
-    private final Set<Long> chunks = new HashSet<>();
+    // Sorted so reseed's origin (the minimum chunk key) is O(log n) rather
+    // than a full scan: reseed runs on every chunk load/unload, and an O(n)
+    // min turns sustained churn (pregen) quadratic in the loaded-chunk count.
+    private final NavigableSet<Long> chunks = new TreeSet<>();
     private final Mailbox<Message> mailbox = new Mailbox<>();
     private final List<Tickable> tickables = new ArrayList<>();
     private final long worldSeed;
@@ -51,7 +55,7 @@ public final class Region {
      * chunks after merge/split resumes an identical stream shape.
      */
     void reseed() {
-        long origin = chunks.stream().min(Long::compare).orElse(0L);
+        long origin = chunks.isEmpty() ? 0L : chunks.first();
         this.random = new SplittableRandom(worldSeed ^ (origin * 0x9E3779B97F4A7C15L));
     }
 

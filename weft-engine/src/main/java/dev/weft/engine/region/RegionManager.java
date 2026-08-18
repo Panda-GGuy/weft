@@ -32,6 +32,14 @@ public final class RegionManager {
     private final AtomicLong nextRegionId = new AtomicLong(1);
     private final Map<Long, Region> chunkToRegion = new HashMap<>();
     private final Set<Region> regions = new HashSet<>();
+    /**
+     * Regions a removal may have disconnected. {@link #recomputeSplits} only
+     * BFS-walks these: a removal whose local neighborhood stays connected
+     * provably cannot split its region (see {@link #splitPossibleAfterRemoval}),
+     * and under sustained load/unload churn (pregen) that is nearly every
+     * removal — whole-map BFS every recompute was the dominant churn cost.
+     */
+    private final Set<Region> maybeSplit = new HashSet<>();
 
     public RegionManager(int mergeDistance, long worldSeed) {
         if (mergeDistance < 1) {
@@ -100,8 +108,12 @@ public final class RegionManager {
             r.chunks().remove(key);
             if (r.chunks().isEmpty()) {
                 regions.remove(r);
+                maybeSplit.remove(r);
             } else {
                 r.reseed();
+                if (!maybeSplit.contains(r) && splitPossibleAfterRemoval(chunkX, chunkZ)) {
+                    maybeSplit.add(r);
+                }
             }
         }
     }
@@ -109,9 +121,15 @@ public final class RegionManager {
     /**
      * Split any region whose chunks are no longer a single connected
      * component under the mergeDistance adjacency. Runs between ticks.
+     * Only regions flagged by a possibly-disconnecting removal are walked;
+     * everything else is provably still connected.
      */
     public void recomputeSplits() {
-        List<Region> snapshot = new ArrayList<>(regions);
+        if (maybeSplit.isEmpty()) {
+            return;
+        }
+        List<Region> snapshot = new ArrayList<>(maybeSplit);
+        maybeSplit.clear();
         for (Region r : snapshot) {
             List<Set<Long>> components = connectedComponents(r.chunks());
             if (components.size() <= 1) {
@@ -150,6 +168,11 @@ public final class RegionManager {
         return chunkToRegion.size();
     }
 
+    /** Regions the next {@link #recomputeSplits} will walk (test hook). */
+    int pendingSplitChecks() {
+        return maybeSplit.size();
+    }
+
     private void absorb(Region into, Region victim) {
         for (long key : victim.chunks()) {
             chunkToRegion.put(key, into);
@@ -159,6 +182,69 @@ public final class RegionManager {
         victim.mailbox().drain().forEach(into.mailbox()::post);
         victim.tickables().forEach(into::addTickable);
         regions.remove(victim);
+        // A possibly-disconnected victim stays possibly-disconnected inside
+        // its absorber (the merge chunk bridges to one component, not all).
+        if (maybeSplit.remove(victim)) {
+            maybeSplit.add(into);
+        }
+    }
+
+    /**
+     * Local no-split proof for {@link #removeChunk}: every adjacency edge the
+     * removed chunk carried ran to chunks within {@code mergeDistance} of it.
+     * If those chunks are still connected to each other through chunks inside
+     * that same window, every path that used the removed chunk reroutes, so
+     * the region cannot have split. The window flood fill uses unit steps
+     * (8-neighbor) — stricter than mergeDistance adjacency, so a {@code true}
+     * here may be a false alarm (recomputeSplits then finds one component and
+     * keeps the region), but {@code false} is always safe.
+     */
+    private boolean splitPossibleAfterRemoval(int chunkX, int chunkZ) {
+        int size = 2 * mergeDistance + 1;
+        boolean[] occupied = new boolean[size * size];
+        int found = 0;
+        int first = -1;
+        for (int dx = -mergeDistance; dx <= mergeDistance; dx++) {
+            for (int dz = -mergeDistance; dz <= mergeDistance; dz++) {
+                if (chunkToRegion.containsKey(ChunkKey.pack(chunkX + dx, chunkZ + dz))) {
+                    int idx = (dx + mergeDistance) * size + (dz + mergeDistance);
+                    occupied[idx] = true;
+                    if (first < 0) {
+                        first = idx;
+                    }
+                    found++;
+                }
+            }
+        }
+        if (found <= 1) {
+            return false; // No pair of neighbors could have lost a path.
+        }
+        int[] stack = new int[found];
+        int top = 0;
+        stack[top++] = first;
+        occupied[first] = false;
+        int reached = 1;
+        while (top > 0) {
+            int cur = stack[--top];
+            int cx = cur / size;
+            int cz = cur % size;
+            for (int dx = -1; dx <= 1; dx++) {
+                for (int dz = -1; dz <= 1; dz++) {
+                    int nx = cx + dx;
+                    int nz = cz + dz;
+                    if (nx < 0 || nx >= size || nz < 0 || nz >= size) {
+                        continue;
+                    }
+                    int n = nx * size + nz;
+                    if (occupied[n]) {
+                        occupied[n] = false;
+                        stack[top++] = n;
+                        reached++;
+                    }
+                }
+            }
+        }
+        return reached < found;
     }
 
     private List<Set<Long>> connectedComponents(Set<Long> chunks) {
