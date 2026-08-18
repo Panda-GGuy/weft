@@ -125,6 +125,12 @@ grounds "mailbox enqueue." That clearance is withdrawn pending evidence — see
 
 ### 3.1 Open audit items (candidate hazards, 2026-08-18)
 
+**Signed off 2026-08-18: hazards 19 and 20 are accepted as blocking exit
+criteria for `parallelRegions` going default-ON.** What is provisional about
+them is the *finding*, not the *gate* — the gate is a decision and it is made.
+Neither may be closed by re-asserting the reasoning that opened it; each closes
+only on the evidence named in its own row.
+
 Every numbered row above cites decompiled 1.21.1/NeoForge evidence. The two
 items below do not yet, so they are **candidates, not findings** — recorded
 here rather than left implicit. Both are closed by the same decompile pass
@@ -181,7 +187,8 @@ never a silently-unsafe parallel mode. The RNG swap and the synchronization
 mixins are active regardless of the flag (identical single-threaded
 semantics, uncontended-lock cost only); the worker chunk path, deferral, and
 fan-out engage only with the flag. **§3.1's candidate hazards 19 and 20 are
-added to the default-ON exit criteria**: `parallelRegions` does not flip
-default-ON with either still open. Exit criteria to default-ON remain: the
+exit criteria for default-ON (signed off 2026-08-18)**: `parallelRegions`
+does not flip default-ON with either still open. Exit criteria to default-ON
+remain: the
 full parity suite green at declared classes, chaos + R7 green, and the
 Create/AE2 soak clean under the flag.
