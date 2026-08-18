@@ -339,7 +339,7 @@ public class PartitionedTickingGameTests {
         helper.runAfterDelay(SETTLE_TICKS + 2 * RUN_TICKS, () -> {
             int movedA = hopperBankDelivered(level, baseA);
             int movedB = hopperBankDelivered(level, baseB);
-            String[] threads = RegionizedTicking.lastEntityPartitionThreads();
+            String[] threads = RegionizedTicking.lastBlockEntityPartitionThreads();
             String serverThread = level.getServer().getRunningThread().getName();
             demolishHopperBank(level, baseA);
             demolishHopperBank(level, baseB);
@@ -354,7 +354,7 @@ public class PartitionedTickingGameTests {
                 }
             }
             if (!fannedOut) {
-                helper.fail("Parallel fan-out never engaged (" + Arrays.toString(threads)
+                helper.fail("Parallel block-entity fan-out never engaged (" + Arrays.toString(threads)
                         + ") - this run did not actually test concurrent capability access");
             }
             if (movedA == 0 || movedB == 0) {

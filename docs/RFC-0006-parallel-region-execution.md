@@ -69,42 +69,47 @@ true of *ownership* but not of *thread-safety*: the map is only ever touched
 by its own region, yet `getBlockEntity` is a **mutating** call and vanilla's
 own tick path invokes it constantly.
 
-### OPEN BUG — concurrent capability lookups (unresolved, 2026-08-17)
+| 18 | `Level.getBlockEntity` — **returns `null` outright when called off the server thread** (`!isClientSide && Thread.currentThread() != this.thread ? null : …`) | **Silent wrongness**: every neighbour lookup from a worker sees an empty world. Vanilla hoppers hit this every tick via NeoForge's `VanillaInventoryCodeHooks`, which turns the null into `new InvWrapper(null)` and throws on `getSlots()` | Region/shard workers take the real lookup (`LevelWorkerBlockEntityMixin`); non-worker off-thread callers keep vanilla's null |
 
-Hazard 17 was found while chasing a crash that it does **not** explain, and
-which is still open. Stated plainly so nobody mistakes the audit for
-complete:
+### How hazard 18 was found, and why it hid for two increments
 
-Two regions ticking **hoppers** concurrently crash with a
-`NullPointerException` inside NeoForge's
-`VanillaInventoryCodeHooks.extractHook`: `ChestBlock.getContainer` is handed
-`null` by `level.getBlockEntity` for a chest that demonstrably exists, and
-wraps it in `new InvWrapper(null)`. Reproducer: the `p2parallelcap` gate,
-which runs the identical rig **serially first** and only then enables
-`parallelRegions` — the serial control passes and delivers items, so this is
-concurrency, not the rig.
+Hazard 18 is the twin of hazard 3 — the same "answers null off-main rather
+than answering correctly" shape — and it crashed both `parallelRegions` and
+WS-10 sharding. It is worth recording how it stayed invisible.
 
-Eliminated so far, each by direct experiment:
+It is **not** a data race. It is deterministic: any block-entity tick on a
+worker that asks the level about a *neighbour* gets `null`. Block entities
+that hold their own reference never notice — a furnace ticker is handed its
+`AbstractFurnaceBlockEntity` and never consults the level — and `p2parallel`'s
+rig is furnaces and armour stands. So the gate was green while the code path
+that breaks was never executed. Hoppers resolve an item-handler capability
+every tick, and crashed on contact.
 
-- **Double chests** — stacks are spaced three blocks apart, so no pairing;
-  crash unchanged.
-- **`LevelChunk.blockEntities` map corruption** — per-chunk lock over the
-  reader and both mutators (hazard 17's fix); crash unchanged.
-- **Stale chunk instance** — worker reads switched from
-  `getChunkIfPresent(FULL)` (the generation pipeline's view) to
-  `getTickingChunk()` (the live chunk); crash unchanged.
+The diagnosis is worth keeping because three plausible theories were wrong,
+each killed by direct experiment rather than argument:
 
-Still open: NeoForge's capability resolution itself (provider caches,
-`BlockCapabilityCache` invalidation), and the block-state read path
-(`PalettedContainer`) that `createBlockEntity` consults. Note the outer
-`getItemHandlerAt` reads the same position as a chest microseconds earlier on
-the same thread, so whatever fails is not a stable property of the position.
+- **Double chests** — the first reproducer placed chests side by side, which
+  pairs them and routes through `DoubleBlockCombiner` where a null container
+  is ordinary. Spacing them apart changed nothing.
+- **`LevelChunk.blockEntities` corruption** (hazard 17) — a per-chunk lock
+  changed nothing. Kept anyway: `getBlockEntity` really does mutate a
+  fastutil open-addressing map, and hazard 18's fix is what finally lets
+  several workers reach those maps at once, so 17 is now load-bearing.
+- **Stale chunk instance** — switching worker reads from
+  `getChunkIfPresent(FULL)` (the generation pipeline's view) to the live
+  ticking chunk changed nothing. Also kept: a worker about to read
+  simulation state should see the live chunk.
 
-The generalizable lesson is already earned: *a gate proves the code paths its
-rig actually exercises, and vanilla content is not the same thing as vanilla
-coverage.* `p2parallel`'s furnaces and armour stands hold their own block-entity
-references and never ask the level for a neighbour, so nothing in the original
-rig could have caught this.
+What settled it was instrumentation rather than reasoning: `Level.getBlockEntity`
+returned null six times while `LevelChunk.getBlockEntity` returned null with the
+entry present **zero** times, and a direct `chunk.getBlockEntity` retry on the
+same thread succeeded — which is only possible if the null is produced *before*
+the chunk is ever consulted.
+
+The generalizable lesson: *a gate proves the code paths its rig actually
+exercises, and vanilla content is not the same thing as vanilla coverage.*
+`p2parallelcap` now holds this case, and it runs its rig serially first so a
+future failure is attributable to concurrency rather than the rig.
 
 Region-confined by construction (no treatment needed): per-section
 `ClassInstanceMultiMap`s, per-chunk state (palettes, heightmaps, BE maps —

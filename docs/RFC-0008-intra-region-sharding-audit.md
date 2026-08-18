@@ -1,6 +1,6 @@
 # RFC-0008: Intra-region sharding against real ticking — the audit that reshapes WS-10
 
-Status: DRAFT · 2026-08-17
+Status: ACCEPTED — implemented and green at class E2 · 2026-08-17
 Depends on: RFC-0004 (WS-10 design, engine-level), RFC-0005 (parity ladder,
 class E2), RFC-0006 (parallel-region audit — this RFC is its sub-region twin),
 P2 increments 1–6
@@ -120,6 +120,13 @@ this increment: with spatial separation plus the guard, a sharded BE mutates
 only its own chunk's state, so there is no cross-shard effect to log. The
 effect log stays reserved for the entity work of §5, where it is genuinely
 needed.
+
+One dependency that was not visible when this RFC was drafted: sharded
+block entities look their neighbours up through `Level.getBlockEntity`,
+which vanilla answers `null` for off-thread callers. That is RFC-0006
+hazard 18, found while first running this increment's gate, and this design
+does not work without its fix — the colouring is what makes concurrent
+lookups *safe*, but the lookups have to actually work.
 
 On `WeftGuards`: `checkRegionMutation` returns `false` for `SHARD` contexts
 (RFC-0004 §2.2's strict rule), which would forbid the chunk mutation a

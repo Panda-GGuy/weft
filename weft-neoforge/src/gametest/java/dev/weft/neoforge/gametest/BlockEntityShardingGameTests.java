@@ -79,11 +79,7 @@ public class BlockEntityShardingGameTests {
     private static final int DEMOLISH_FLAGS =
             Block.UPDATE_CLIENTS | Block.UPDATE_KNOWN_SHAPE | Block.UPDATE_SUPPRESS_DROPS;
 
-    // TEMPORARILY PARKED while the capability-path crash is isolated: this
-    // test kills the whole game-test server (the NPE escapes the tick), which
-    // would mask every other batch's result. Restore the annotation once
-    // BlockEntityShards no longer crashes.
-    // @GameTest(template = "empty", batch = "p2shard", timeoutTicks = 1600)
+    @GameTest(template = "empty", batch = "p2shard", timeoutTicks = 1600)
     public void blockEntityShardingConservesUnderColouredPasses(GameTestHelper helper) {
         ServerLevel level = helper.getLevel();
         BlockPos ground = WeftBenchGameTests.groundOrigin(helper);

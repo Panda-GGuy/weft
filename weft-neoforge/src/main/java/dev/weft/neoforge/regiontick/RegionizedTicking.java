@@ -85,6 +85,8 @@ public final class RegionizedTicking {
     private static volatile long[] lastBlockEntityPartition = new long[0];
     /** Thread names per bucket of the most recent entity section (E1 probe). */
     private static volatile String[] lastEntityPartitionThreads = new String[0];
+    /** Same, for the block-entity section — the only probe a BE-only rig has. */
+    private static volatile String[] lastBlockEntityPartitionThreads = new String[0];
 
     /**
      * Work deferred by a region worker to the end of the current section
@@ -193,6 +195,7 @@ public final class RegionizedTicking {
         lastEntityPartition = new long[0];
         lastBlockEntityPartition = new long[0];
         lastEntityPartitionThreads = new String[0];
+        lastBlockEntityPartitionThreads = new String[0];
         sectionEndTasks.clear();
     }
 
@@ -328,7 +331,7 @@ public final class RegionizedTicking {
                 }
             }));
         }
-        runBuckets(engine, sections);
+        String[] beThreads = runBuckets(engine, sections);
         if (!tail.isEmpty()) {
             unmappedUnits.add(tail.size());
             engine.runOwnedSerial(ownerId(level), () -> tail.forEach(Runnable::run));
@@ -336,6 +339,7 @@ public final class RegionizedTicking {
         drainSectionEndTasks();
         partitionedSections.increment();
         lastBlockEntityPartition = partition;
+        lastBlockEntityPartitionThreads = beThreads;
     }
 
     /**
@@ -454,6 +458,11 @@ public final class RegionizedTicking {
     /** Thread names per bucket of the most recent entity section (E1 probe). */
     public static String[] lastEntityPartitionThreads() {
         return lastEntityPartitionThreads.clone();
+    }
+
+    /** Thread names per bucket of the most recent block-entity section. */
+    public static String[] lastBlockEntityPartitionThreads() {
+        return lastBlockEntityPartitionThreads.clone();
     }
 
     /** Whether block-entity sharding is engaged (RFC-0008). */

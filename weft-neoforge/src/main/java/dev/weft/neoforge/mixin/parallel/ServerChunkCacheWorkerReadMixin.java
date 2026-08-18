@@ -2,6 +2,7 @@ package dev.weft.neoforge.mixin.parallel;
 
 import dev.weft.neoforge.regiontick.ParallelAccess;
 import net.minecraft.server.level.ChunkHolder;
+import net.minecraft.server.level.ChunkResult;
 import net.minecraft.server.level.ServerChunkCache;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.ChunkAccess;
@@ -79,23 +80,35 @@ public abstract class ServerChunkCacheWorkerReadMixin {
      * {@code GenerationChunkHolder}'s per-status future — the chunk as the
      * <em>generation pipeline</em> produced it — while {@code getTickingChunk}
      * returns the live {@link LevelChunk} the server is actually simulating.
-     * Asking for the live chunk is the correct thing for a worker that is
-     * about to read simulation state, so the change stands on its own.
+     * <p><b>This was the p2parallelcap crash.</b> Workers saw {@code null}
+     * from {@code level.getBlockEntity} for chests that demonstrably existed;
+     * instrumentation showed {@code LevelChunk.getBlockEntity} never returned
+     * null while holding the entry, which pinned the fault on
+     * <em>which chunk object</em> the worker was handed. At {@code FULL} the
+     * generation future can hold a different {@link LevelChunk} instance than
+     * the one the server is ticking — same coordinates, different object,
+     * and its block-entity map does not have the live entries. Block entities
+     * that hold their own reference (a furnace ticker never asks the level)
+     * cannot notice; anything that looks a neighbour up sees an empty world.
+     * Hence a furnace-and-armour-stand rig stayed green for two increments
+     * while hoppers crashed immediately.
      *
-     * <p><b>Honest scope: this did NOT fix the open p2parallelcap crash</b>
-     * (workers seeing {@code null} from {@code level.getBlockEntity} for a
-     * chest that exists). The crash reproduces unchanged with this in place,
-     * so a stale generation-pipeline chunk instance is ruled out as its
-     * cause.
+     * <p>So at {@code FULL} we only ever accept a <em>live</em> chunk — the
+     * ticking chunk, else the full-chunk future — and never the generation
+     * view. A null here falls through to the caller's fail-loud path, which
+     * is correct: a worker ticking a chunk's contents requires that chunk to
+     * be live.
      */
     @Unique
     private ChunkAccess weft$resolve(ChunkHolder holder, ChunkStatus status) {
-        if (status == ChunkStatus.FULL) {
-            LevelChunk ticking = holder.getTickingChunk();
-            if (ticking != null) {
-                return ticking;
-            }
+        if (status != ChunkStatus.FULL) {
+            return holder.getChunkIfPresent(status);
         }
-        return holder.getChunkIfPresent(status);
+        LevelChunk ticking = holder.getTickingChunk();
+        if (ticking != null) {
+            return ticking;
+        }
+        ChunkResult<LevelChunk> full = holder.getFullChunkFuture().getNow(null);
+        return full != null ? full.orElse(null) : null;
     }
 }
