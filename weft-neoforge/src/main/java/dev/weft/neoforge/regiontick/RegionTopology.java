@@ -22,16 +22,18 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * across levels); merge happens on load (cheap, local scan), splits are
  * recomputed between ticks, throttled and only when chunks were removed.
  *
- * <p><b>What this is — and deliberately is not — yet.</b> These managers are
- * loader-owned <em>bookkeeping</em>: the topology is maintained, validated by
- * the {@code p2regions} gametest, and surfaced in {@code /weft status}, but
- * the scheduler's own (empty) RegionManager remains the execution authority
- * and owner routing still resolves to the global inbox. Rerouting owner mail
- * into region mailboxes is only safe once region workers own the state a
- * message touches — mailboxes are drained on workers in the MAIL phase, and
- * while vanilla owns simulation every async result must keep applying on the
- * server thread. That rewiring is the parallel-regions increment's job
- * (RFC-0005 §4 class E1), not this one's.
+ * <p><b>What these managers are.</b> Loader-owned topology, validated by the
+ * {@code p2regions} gametest and surfaced in {@code /weft status}. Since
+ * increment 4 they decide vanilla-section bucket membership
+ * ({@link RegionizedTicking}), and since increment 6 they are the
+ * <em>routing authority</em> for owner mail (RFC-0007 §3.1): with
+ * {@code ownerMailRouting} active, positionally-owned work is posted to the
+ * owning region's own mailbox ({@link OwnerMail}) and drained at the head of
+ * that region's bucket run. Mail stranded by a topology mutation (split,
+ * emptied region) reroutes to the scheduler's global inbox via the stranded
+ * sink wired below. The scheduler's own RegionManager remains only the owner
+ * id reservation counter; full engine-pipeline unification is the v2 arc
+ * (RFC-0007 §5).
  *
  * <p>Always-on by design: this is pure bookkeeping (a map update per chunk
  * load/unload — the nightly {@code loadgen_fresh_chunk_load} trend guards the
@@ -115,8 +117,31 @@ public final class RegionTopology {
 
     /** The live mapping for a level; creates it on first use (server thread). */
     public static RegionManager managerFor(ServerLevel level) {
-        return managers.computeIfAbsent(level,
-                l -> new RegionManager(WeftConfig.MERGE_DISTANCE, l.getSeed()));
+        return managers.computeIfAbsent(level, l -> {
+            RegionManager manager = new RegionManager(WeftConfig.MERGE_DISTANCE, l.getSeed());
+            // RFC-0007 §3.3: mail stranded by a split or an emptied region is
+            // rerouted to the global inbox — always-safe delivery at the next
+            // INGEST, one tick late, rare. Scheduler gone (server stopping):
+            // dropped, its target state is being torn down with it (same
+            // contract as WeftMod.postToOwner).
+            manager.setStrandedMailSink(m -> {
+                dev.weft.engine.sched.WeftScheduler s = WeftMod.schedulerOrNull();
+                if (s != null) {
+                    s.submit(m);
+                }
+            });
+            return manager;
+        });
+    }
+
+    /** Visit every region of every live level (server thread; flush path). */
+    static void forEachRegion(java.util.function.Consumer<dev.weft.engine.region.Region> visitor) {
+        for (RegionManager manager : managers.values()) {
+            // Copy: a visitor that mutates topology must not blow the iterator.
+            for (dev.weft.engine.region.Region region : java.util.List.copyOf(manager.all())) {
+                visitor.accept(region);
+            }
+        }
     }
 
     /** One-line topology summary for {@code /weft status} (R5). */

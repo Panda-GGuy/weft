@@ -185,6 +185,17 @@ public final class WeftConfig {
                     "suite, chaos, R7 and the Create/AE2 soak are green under the flag.")
             .define("parallelRegions", false);
 
+    private static final ModConfigSpec.BooleanValue OWNER_MAIL_ROUTING_SPEC = BUILDER
+            .comment("P2 increment 6 (RFC-0007 sec. 3): deliver positionally-owned async",
+                    "results (WS-2 path fills) to the owning region's OWN mailbox, drained",
+                    "by that region's bucket at the head of its section run - replacing",
+                    "the parked-main-thread global inbox as the delivery model. Delivery",
+                    "still lands before the owner's simulation each tick; unmapped targets",
+                    "and target-less work keep the global-inbox path. Requires",
+                    "partitionedTicking (the bucket IS the drain point). Ships off until",
+                    "the parity suite and the p2mail contract gate are green (RFC-0005).")
+            .define("ownerMailRouting", false);
+
     private static final ModConfigSpec.BooleanValue LEGACY_LANE_SPEC = BUILDER
             .comment("P2 (RFC-0001 sec. 7.2): extract Tier-2 (unverified) mods' entity and",
                     "block-entity tick work from the vanilla sections and run it in the",
@@ -237,6 +248,7 @@ public final class WeftConfig {
     public static volatile boolean REGIONIZED_TICKING = false;
     public static volatile boolean PARTITIONED_TICKING = false;
     public static volatile boolean PARALLEL_REGIONS = false;
+    public static volatile boolean OWNER_MAIL_ROUTING = false;
     public static volatile boolean LEGACY_LANE = false;
     public static volatile Set<String> FORCE_ENABLE_MODULES = Set.of();
     public static volatile Set<String> FORCE_DISABLE_MODULES = Set.of();
@@ -292,6 +304,7 @@ public final class WeftConfig {
         REGIONIZED_TICKING = REGIONIZED_TICKING_SPEC.get();
         PARTITIONED_TICKING = PARTITIONED_TICKING_SPEC.get();
         PARALLEL_REGIONS = PARALLEL_REGIONS_SPEC.get();
+        OWNER_MAIL_ROUTING = OWNER_MAIL_ROUTING_SPEC.get();
         LEGACY_LANE = LEGACY_LANE_SPEC.get();
         FORCE_ENABLE_MODULES = Set.copyOf(FORCE_ENABLE_MODULES_SPEC.get());
         FORCE_DISABLE_MODULES = Set.copyOf(FORCE_DISABLE_MODULES_SPEC.get());

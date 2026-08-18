@@ -498,10 +498,20 @@ thread-local neighbor-update chains, deferred mid-tick dimension
 changes, deterministic legacy-lane ordering); gated by the parity
 anchor with all increments active plus the p2parallel gametest
 (every bucket off the server thread, per-island end states
-bit-identical to inline control — the E1 claim concrete). Remaining
-before default-ON: free-running regions (true owner-mail rerouting),
+bit-identical to inline control — the E1 claim concrete). Increment 6
+(same day): owner-mail rerouting behind `ownerMailRouting` (RFC-0007 §3)
+— positionally-owned async results (WS-2 path fills) delivered to the
+owning region's own mailbox via the real topology managers and drained
+at the head of that region's bucket run, replacing the parked-main-
+thread global inbox as the delivery model; mail stranded by topology
+mutations (splits, emptied regions) reroutes to the global inbox;
+gated by the parity anchor (all six increments active, zero-residue on
+an all-vanilla arena, still E0) plus the p2mail contract gametest
+(delivery under the owner's REGION context off the server thread,
+unmapped-target fallback, deactivation flush, exact counters).
+Remaining before default-ON: the single-join region tick (RFC-0007 §4),
 WS-10 activation inside big regions (E2), and the soak matrix under
-the flag.
+the flags.
 
 ## 12. Risk register (top items)
 

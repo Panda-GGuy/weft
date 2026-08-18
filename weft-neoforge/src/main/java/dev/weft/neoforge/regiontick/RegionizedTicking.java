@@ -69,6 +69,7 @@ public final class RegionizedTicking {
     private static volatile boolean active;
     private static volatile boolean partitioned;
     private static volatile boolean parallel;
+    private static volatile boolean mailRouted;
 
     /** One reserved engine owner id per live ServerLevel (increment 1's "one region"). */
     private static final ConcurrentHashMap<ServerLevel, Long> ownerIds = new ConcurrentHashMap<>();
@@ -96,6 +97,7 @@ public final class RegionizedTicking {
     // server thread and levels tick sequentially, so one static slot is
     // enough; non-null only while a partitioned BE section is collecting.
     private static TreeMap<Long, List<Runnable>> beBuckets;
+    private static java.util.HashMap<Long, Region> beBucketRegions;
     private static List<Runnable> beTail;
     private static ServerLevel beLevel;
 
@@ -110,6 +112,7 @@ public final class RegionizedTicking {
         active = value;
         partitioned = value && WeftConfig.PARTITIONED_TICKING;
         parallel = partitioned && WeftConfig.PARALLEL_REGIONS;
+        updateMailRouted(partitioned && WeftConfig.OWNER_MAIL_ROUTING);
     }
 
     /** Direct switch for tests (parity/partition gametests drive runs). */
@@ -118,6 +121,7 @@ public final class RegionizedTicking {
         if (!value) {
             partitioned = false;
             parallel = false;
+            updateMailRouted(false);
         }
     }
 
@@ -126,6 +130,7 @@ public final class RegionizedTicking {
         partitioned = value && active;
         if (!partitioned) {
             parallel = false;
+            updateMailRouted(false);
         }
     }
 
@@ -134,12 +139,40 @@ public final class RegionizedTicking {
         parallel = value && partitioned;
     }
 
+    /** Direct switch for tests; production resolution goes via applyActive. */
+    public static void setMailRouting(boolean value) {
+        updateMailRouted(value && partitioned);
+    }
+
+    /**
+     * Every transition to OFF flushes queued region mail inline (server
+     * thread) so nothing is stranded behind a flag no bucket will drain
+     * again (RFC-0007 §3.3 hazard 5). Flag flips happen on the server thread
+     * (config resolution, gametests).
+     */
+    private static void updateMailRouted(boolean value) {
+        boolean was = mailRouted;
+        mailRouted = value;
+        if (was && !value) {
+            OwnerMail.flushAllInline();
+        }
+    }
+
     public static boolean isActive() {
         return active;
     }
 
+    /** Whether owner mail routes to region mailboxes (increment 6, RFC-0007 §3). */
+    public static boolean isMailRouted() {
+        return mailRouted;
+    }
+
     /** Server stop: the level instances die with the server; drop their ids. */
     public static void reset() {
+        // No flush: queued region mail targets state that is being torn down
+        // with the server, exactly like the global inbox dying with the
+        // scheduler (WeftMod.postToOwner's documented drop contract).
+        mailRouted = false;
         ownerIds.clear();
         lastEntityPartition = new long[0];
         lastBlockEntityPartition = new long[0];
@@ -172,6 +205,7 @@ public final class RegionizedTicking {
         // then run buckets ascending by real region id.
         RegionManager topology = RegionTopology.managerFor(level);
         TreeMap<Long, List<Entity>> buckets = new TreeMap<>();
+        java.util.HashMap<Long, Region> bucketRegions = new java.util.HashMap<>();
         List<Entity> tail = new ArrayList<>();
         engine.runOwnedSerial(ownerId(level), () -> original.accept(list, entity -> {
             ChunkPos chunk = entity.chunkPosition();
@@ -180,15 +214,25 @@ public final class RegionizedTicking {
                 tail.add(entity);
             } else {
                 buckets.computeIfAbsent(region.id(), k -> new ArrayList<>()).add(entity);
+                bucketRegions.putIfAbsent(region.id(), region);
             }
         }));
 
+        // Increment 6 (RFC-0007 §3.2): each bucket drains its region's owner
+        // mail first, under the bucket's own REGION context — delivery lands
+        // before any of the owner's simulation this section. Flag captured
+        // once so the whole section sees one policy.
+        boolean drainMail = mailRouted;
         long[] partition = new long[buckets.size()];
         List<WeftScheduler.OwnedSection> sections = new ArrayList<>(buckets.size());
         int i = 0;
         for (var bucket : buckets.entrySet()) {
             partition[i++] = bucket.getKey();
+            Region bucketRegion = bucketRegions.get(bucket.getKey());
             sections.add(new WeftScheduler.OwnedSection(bucket.getKey(), () -> {
+                if (drainMail) {
+                    OwnerMail.drainInto(bucketRegion);
+                }
                 for (Entity entity : bucket.getValue()) {
                     ticker.accept(entity);
                 }
@@ -229,25 +273,36 @@ public final class RegionizedTicking {
         }
 
         TreeMap<Long, List<Runnable>> buckets = new TreeMap<>();
+        java.util.HashMap<Long, Region> bucketRegions = new java.util.HashMap<>();
         List<Runnable> tail = new ArrayList<>();
         beBuckets = buckets;
+        beBucketRegions = bucketRegions;
         beTail = tail;
         beLevel = level;
         try {
             engine.runOwnedSerial(ownerId(level), vanillaSection);
         } finally {
             beBuckets = null;
+            beBucketRegions = null;
             beTail = null;
             beLevel = null;
         }
 
+        // Increment 6: bucket-head owner-mail drain, same contract as the
+        // entity section (RFC-0007 §3.2).
+        boolean drainMail = mailRouted;
         long[] partition = new long[buckets.size()];
         List<WeftScheduler.OwnedSection> sections = new ArrayList<>(buckets.size());
         int i = 0;
         for (var bucket : buckets.entrySet()) {
             partition[i++] = bucket.getKey();
-            sections.add(new WeftScheduler.OwnedSection(bucket.getKey(),
-                    () -> bucket.getValue().forEach(Runnable::run)));
+            Region bucketRegion = bucketRegions.get(bucket.getKey());
+            sections.add(new WeftScheduler.OwnedSection(bucket.getKey(), () -> {
+                if (drainMail) {
+                    OwnerMail.drainInto(bucketRegion);
+                }
+                bucket.getValue().forEach(Runnable::run);
+            }));
         }
         runBuckets(engine, sections);
         if (!tail.isEmpty()) {
@@ -330,6 +385,7 @@ public final class RegionizedTicking {
             beTail.add(unit);
         } else {
             buckets.computeIfAbsent(region.id(), k -> new ArrayList<>()).add(unit);
+            beBucketRegions.putIfAbsent(region.id(), region);
         }
         return true;
     }
@@ -383,7 +439,8 @@ public final class RegionizedTicking {
                         parallel ? "fan-out at >=2 buckets" : "serial",
                         partitionedSections.sum(), unmappedUnits.sum(), lastEntityPartition.length)
                 : "increment 1 ticking (whole level, serial, server thread)";
-        return mode + ": " + sections + "; " + RegionTopology.summary();
+        String mail = mailRouted ? "; " + OwnerMail.summary() : "";
+        return mode + ": " + sections + "; " + RegionTopology.summary() + mail;
     }
 
     private static long ownerId(ServerLevel level) {

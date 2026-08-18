@@ -90,9 +90,25 @@ public final class PathfindingHooks {
         AsyncPath pending = new AsyncPath(targets.iterator().next(), currentPath,
                 mob.blockPosition());
         submitted.increment();
+        // Increment 6 (RFC-0007 §3): the delivered task lands on the server
+        // thread at INGEST (PathService's owner-post channel is the global
+        // inbox); from there OwnerMail routes the fill to the mob's owning
+        // region — applied at that region's bucket head, still before the
+        // mob's own tick. Routing inactive or the mob's chunk unmapped: the
+        // fill runs inline at INGEST, bit-for-bit the pre-increment path.
+        // The mob's position is read at routing time (server thread), so the
+        // fill chases the mob's current region, not its submit-time one.
         s.submitTask(mob.getId(), vanillaCompute::get, result -> {
-            (result == null ? noPath : filled).increment();
-            pending.fill(result);
+            Runnable fill = () -> {
+                (result == null ? noPath : filled).increment();
+                pending.fill(result);
+            };
+            if (mob.level() instanceof net.minecraft.server.level.ServerLevel serverLevel) {
+                dev.weft.neoforge.regiontick.OwnerMail.runOwned(
+                        serverLevel, mob.blockPosition(), fill);
+            } else {
+                fill.run();
+            }
         });
         return pending;
     }
