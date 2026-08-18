@@ -11,6 +11,8 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.item.FallingBlockEntity;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.Container;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.chunk.LevelChunk;
@@ -63,6 +65,79 @@ public final class WorldDigest {
         captureBlocksAndBlockEntities(level, blockMin, blockMax, out);
         captureEntities(level, blockMin, entityBounds, out);
         return out;
+    }
+
+    /**
+     * The snapshot half of an RFC-0005 class <b>E2</b> capture: quantities
+     * that must be <em>conserved</em> even when within-tick ordering is
+     * allowed to differ (WS-10 sharding, RFC-0004 §2.5) — the population by
+     * entity type, and every item in the arena counted by item type across
+     * both container block entities and loose item entities.
+     *
+     * <p>Deliberately <em>not</em> a state digest: no positions, no NBT, no
+     * per-entity identity. Two runs that interleave differently will
+     * legitimately disagree on {@link #capture}'s entries while agreeing
+     * here, and that difference is exactly what E2 is for. Every value is an
+     * integer total, so the comparison is order-independent by construction.
+     *
+     * <p>Item counting walks container block entities via their own slot
+     * accessors, so a mod container that stores items outside a vanilla
+     * {@code Container} contributes nothing — an honest floor, not a lie: it
+     * can under-count what it cannot see, but it never invents conservation
+     * it did not verify. The suite's scenarios use vanilla containers.
+     */
+    public static SortedMap<String, String> captureConservation(ServerLevel level, BlockPos blockMin,
+                                                                BlockPos blockMax, AABB entityBounds) {
+        TreeMap<String, String> out = new TreeMap<>();
+        Map<String, Integer> entityCounts = new HashMap<>();
+        Map<String, Integer> itemCounts = new HashMap<>();
+
+        for (Entity entity : level.getEntities((Entity) null, entityBounds, e -> !(e instanceof Player))) {
+            entityCounts.merge(String.valueOf(BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType())),
+                    1, Integer::sum);
+            if (entity instanceof ItemEntity item) {
+                countStack(itemCounts, item.getItem());
+            }
+        }
+
+        for (int cx = blockMin.getX() >> 4; cx <= blockMax.getX() >> 4; cx++) {
+            for (int cz = blockMin.getZ() >> 4; cz <= blockMax.getZ() >> 4; cz++) {
+                for (Map.Entry<BlockPos, BlockEntity> e : level.getChunk(cx, cz).getBlockEntities().entrySet()) {
+                    BlockPos pos = e.getKey();
+                    if (pos.getX() < blockMin.getX() || pos.getX() > blockMax.getX()
+                            || pos.getY() < blockMin.getY() || pos.getY() > blockMax.getY()
+                            || pos.getZ() < blockMin.getZ() || pos.getZ() > blockMax.getZ()) {
+                        continue;
+                    }
+                    if (e.getValue() instanceof Container container) {
+                        for (int slot = 0; slot < container.getContainerSize(); slot++) {
+                            countStack(itemCounts, container.getItem(slot));
+                        }
+                    }
+                }
+            }
+        }
+
+        int population = 0;
+        for (Map.Entry<String, Integer> e : entityCounts.entrySet()) {
+            out.put("cons entities " + e.getKey(), Integer.toString(e.getValue()));
+            population += e.getValue();
+        }
+        out.put("cons entities total", Integer.toString(population));
+        int items = 0;
+        for (Map.Entry<String, Integer> e : itemCounts.entrySet()) {
+            out.put("cons items " + e.getKey(), Integer.toString(e.getValue()));
+            items += e.getValue();
+        }
+        out.put("cons items total", Integer.toString(items));
+        return out;
+    }
+
+    private static void countStack(Map<String, Integer> counts, ItemStack stack) {
+        if (!stack.isEmpty()) {
+            counts.merge(String.valueOf(BuiltInRegistries.ITEM.getKey(stack.getItem())),
+                    stack.getCount(), Integer::sum);
+        }
     }
 
     /** Human-readable first differences between two digests, at most {@code limit} entries. */

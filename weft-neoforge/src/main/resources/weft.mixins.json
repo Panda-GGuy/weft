@@ -20,7 +20,10 @@
     "parallel.EntitySectionStorageSyncMixin",
     "parallel.PersistentEntitySectionManagerUuidMixin",
     "parallel.ChunkMapTrackerSyncMixin",
-    "parallel.EntityChangeDimensionDeferMixin"
+    "parallel.EntityChangeDimensionDeferMixin",
+    "parallel.LevelChunkBlockEntitySyncMixin",
+    "parallel.LevelWorkerBlockEntityMixin",
+    "shard.LevelShardDomainMixin"
   ],
   "injectors": {
     "defaultRequire": 1

@@ -579,7 +579,10 @@ public class WeftBenchGameTests {
      * ({@code TickRecord.tickNanos}): the whole server tick, all levels and
      * phases, i.e. the number a TPS monitor reports.
      */
-    private static double[] msptMsPerTick(GameTestHelper helper, long startTickExclusive) {
+    // Package-private so the P2 sharding benchmark measures MSPT the exact
+    // same way the P1 exit criterion does, rather than a near-copy that could
+    // drift from it.
+    static double[] msptMsPerTick(GameTestHelper helper, long startTickExclusive) {
         long endInclusive = WeftProfiler.get().tickCounter() - 1;
         java.util.List<Long> nanos = new java.util.ArrayList<>();
         for (TickProfiler.TickRecord record : WeftProfiler.get().snapshotWindow()) {

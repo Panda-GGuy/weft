@@ -60,8 +60,60 @@ Consequences:
 | 15 | `ProfilerFiller` captured by the entity consumer | Corrupt spans if `/debug` profiling is active | Documented unsupported with `parallelRegions` (normal runs use `InactiveProfiler` — no-op). Weft's own profiler is already server-thread-confined (P1 lesson) |
 | 16 | `LegacyLane.submit` from workers | FIFO order becomes scheduling-dependent | Submissions carry (regionId, seq); the drain sorts — deterministic §7.2 order restored |
 
+| 17 | `LevelChunk.getBlockEntity` — mutates `ChunkAccess.blockEntities` (fastutil `Object2ObjectOpenHashMap`) and `pendingBlockEntities` (`HashMap`) **on the read path**: drops removed entries, drains pending, and creates+registers on a miss under `IMMEDIATE` | Concurrent `get` against another thread's `put` on an open-addressing table returns `null` for a present key — a block entity vanishes mid-tick | Per-`LevelChunk` lock over the mutators **and** the reader (`LevelChunkBlockEntitySyncMixin`) |
+
+**Hazard 17 was missed by this audit's first pass and is recorded here as a
+correction** (added 2026-08-17, after increment 5 had merged). The audit
+below dismissed "per-chunk state … BE maps" as region-confined, which is
+true of *ownership* but not of *thread-safety*: the map is only ever touched
+by its own region, yet `getBlockEntity` is a **mutating** call and vanilla's
+own tick path invokes it constantly.
+
+| 18 | `Level.getBlockEntity` — **returns `null` outright when called off the server thread** (`!isClientSide && Thread.currentThread() != this.thread ? null : …`) | **Silent wrongness**: every neighbour lookup from a worker sees an empty world. Vanilla hoppers hit this every tick via NeoForge's `VanillaInventoryCodeHooks`, which turns the null into `new InvWrapper(null)` and throws on `getSlots()` | Region/shard workers take the real lookup (`LevelWorkerBlockEntityMixin`); non-worker off-thread callers keep vanilla's null |
+
+### How hazard 18 was found, and why it hid for two increments
+
+Hazard 18 is the twin of hazard 3 — the same "answers null off-main rather
+than answering correctly" shape — and it crashed both `parallelRegions` and
+WS-10 sharding. It is worth recording how it stayed invisible.
+
+It is **not** a data race. It is deterministic: any block-entity tick on a
+worker that asks the level about a *neighbour* gets `null`. Block entities
+that hold their own reference never notice — a furnace ticker is handed its
+`AbstractFurnaceBlockEntity` and never consults the level — and `p2parallel`'s
+rig is furnaces and armour stands. So the gate was green while the code path
+that breaks was never executed. Hoppers resolve an item-handler capability
+every tick, and crashed on contact.
+
+The diagnosis is worth keeping because three plausible theories were wrong,
+each killed by direct experiment rather than argument:
+
+- **Double chests** — the first reproducer placed chests side by side, which
+  pairs them and routes through `DoubleBlockCombiner` where a null container
+  is ordinary. Spacing them apart changed nothing.
+- **`LevelChunk.blockEntities` corruption** (hazard 17) — a per-chunk lock
+  changed nothing. Kept anyway: `getBlockEntity` really does mutate a
+  fastutil open-addressing map, and hazard 18's fix is what finally lets
+  several workers reach those maps at once, so 17 is now load-bearing.
+- **Stale chunk instance** — switching worker reads from
+  `getChunkIfPresent(FULL)` (the generation pipeline's view) to the live
+  ticking chunk changed nothing. Also kept: a worker about to read
+  simulation state should see the live chunk.
+
+What settled it was instrumentation rather than reasoning: `Level.getBlockEntity`
+returned null six times while `LevelChunk.getBlockEntity` returned null with the
+entry present **zero** times, and a direct `chunk.getBlockEntity` retry on the
+same thread succeeded — which is only possible if the null is produced *before*
+the chunk is ever consulted.
+
+The generalizable lesson: *a gate proves the code paths its rig actually
+exercises, and vanilla content is not the same thing as vanilla coverage.*
+`p2parallelcap` now holds this case, and it runs its rig serially first so a
+future failure is attributable to concurrency rather than the rig.
+
 Region-confined by construction (no treatment needed): per-section
-`ClassInstanceMultiMap`s, per-chunk state (palettes, heightmaps, BE maps),
+`ClassInstanceMultiMap`s, per-chunk state (palettes, heightmaps, BE maps —
+for *ownership*; see hazard 17 for why that did not imply thread-safety),
 container contents, per-entity state, per-region interactions (damage,
 pushing, targeting — nothing reaches across a ≥ mergeDistance gap in one
 tick). Thread-safe by design (no treatment needed): `ThreadedLevelLightEngine`

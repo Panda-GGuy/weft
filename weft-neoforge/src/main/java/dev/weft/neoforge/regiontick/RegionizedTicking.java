@@ -70,6 +70,7 @@ public final class RegionizedTicking {
     private static volatile boolean partitioned;
     private static volatile boolean parallel;
     private static volatile boolean mailRouted;
+    private static volatile boolean sharded;
 
     /** One reserved engine owner id per live ServerLevel (increment 1's "one region"). */
     private static final ConcurrentHashMap<ServerLevel, Long> ownerIds = new ConcurrentHashMap<>();
@@ -84,6 +85,8 @@ public final class RegionizedTicking {
     private static volatile long[] lastBlockEntityPartition = new long[0];
     /** Thread names per bucket of the most recent entity section (E1 probe). */
     private static volatile String[] lastEntityPartitionThreads = new String[0];
+    /** Same, for the block-entity section — the only probe a BE-only rig has. */
+    private static volatile String[] lastBlockEntityPartitionThreads = new String[0];
 
     /**
      * Work deferred by a region worker to the end of the current section
@@ -96,7 +99,7 @@ public final class RegionizedTicking {
     // Block-entity capture state. Server-thread only: sections run on the
     // server thread and levels tick sequentially, so one static slot is
     // enough; non-null only while a partitioned BE section is collecting.
-    private static TreeMap<Long, List<Runnable>> beBuckets;
+    private static TreeMap<Long, List<BeTickUnit>> beBuckets;
     private static java.util.HashMap<Long, Region> beBucketRegions;
     private static List<Runnable> beTail;
     private static ServerLevel beLevel;
@@ -112,6 +115,7 @@ public final class RegionizedTicking {
         active = value;
         partitioned = value && WeftConfig.PARTITIONED_TICKING;
         parallel = partitioned && WeftConfig.PARALLEL_REGIONS;
+        sharded = partitioned && WeftConfig.BLOCK_ENTITY_SHARDING;
         updateMailRouted(partitioned && WeftConfig.OWNER_MAIL_ROUTING);
     }
 
@@ -121,6 +125,7 @@ public final class RegionizedTicking {
         if (!value) {
             partitioned = false;
             parallel = false;
+            sharded = false;
             updateMailRouted(false);
         }
     }
@@ -130,8 +135,19 @@ public final class RegionizedTicking {
         partitioned = value && active;
         if (!partitioned) {
             parallel = false;
+            sharded = false;
             updateMailRouted(false);
         }
+    }
+
+    /**
+     * Direct switch for tests; production resolution goes via applyActive.
+     * Block-entity sharding (RFC-0008) is independent of {@code parallel}:
+     * the colouring fans out inside a single region's bucket, which is
+     * exactly the solo-play case where region parallelism does nothing.
+     */
+    public static void setBlockEntitySharding(boolean value) {
+        sharded = value && partitioned;
     }
 
     /** Direct switch for tests; production resolution goes via applyActive. */
@@ -173,10 +189,13 @@ public final class RegionizedTicking {
         // with the server, exactly like the global inbox dying with the
         // scheduler (WeftMod.postToOwner's documented drop contract).
         mailRouted = false;
+        sharded = false;
+        BlockEntityShards.reset();
         ownerIds.clear();
         lastEntityPartition = new long[0];
         lastBlockEntityPartition = new long[0];
         lastEntityPartitionThreads = new String[0];
+        lastBlockEntityPartitionThreads = new String[0];
         sectionEndTasks.clear();
     }
 
@@ -272,7 +291,7 @@ public final class RegionizedTicking {
             return;
         }
 
-        TreeMap<Long, List<Runnable>> buckets = new TreeMap<>();
+        TreeMap<Long, List<BeTickUnit>> buckets = new TreeMap<>();
         java.util.HashMap<Long, Region> bucketRegions = new java.util.HashMap<>();
         List<Runnable> tail = new ArrayList<>();
         beBuckets = buckets;
@@ -291,20 +310,28 @@ public final class RegionizedTicking {
         // Increment 6: bucket-head owner-mail drain, same contract as the
         // entity section (RFC-0007 §3.2).
         boolean drainMail = mailRouted;
+        boolean shardThisSection = sharded;
         long[] partition = new long[buckets.size()];
         List<WeftScheduler.OwnedSection> sections = new ArrayList<>(buckets.size());
         int i = 0;
         for (var bucket : buckets.entrySet()) {
             partition[i++] = bucket.getKey();
             Region bucketRegion = bucketRegions.get(bucket.getKey());
-            sections.add(new WeftScheduler.OwnedSection(bucket.getKey(), () -> {
+            long regionId = bucket.getKey();
+            List<BeTickUnit> units = bucket.getValue();
+            sections.add(new WeftScheduler.OwnedSection(regionId, () -> {
                 if (drainMail) {
                     OwnerMail.drainInto(bucketRegion);
                 }
-                bucket.getValue().forEach(Runnable::run);
+                if (shardThisSection
+                        && units.size() >= WeftConfig.BLOCK_ENTITY_SHARD_MIN_UNITS) {
+                    BlockEntityShards.runColoured(engine, regionId, units);
+                } else {
+                    units.forEach(u -> u.unit().run());
+                }
             }));
         }
-        runBuckets(engine, sections);
+        String[] beThreads = runBuckets(engine, sections);
         if (!tail.isEmpty()) {
             unmappedUnits.add(tail.size());
             engine.runOwnedSerial(ownerId(level), () -> tail.forEach(Runnable::run));
@@ -312,6 +339,7 @@ public final class RegionizedTicking {
         drainSectionEndTasks();
         partitionedSections.increment();
         lastBlockEntityPartition = partition;
+        lastBlockEntityPartitionThreads = beThreads;
     }
 
     /**
@@ -375,7 +403,7 @@ public final class RegionizedTicking {
      */
     public static boolean captureBlockEntityUnit(ServerLevel level, TickingBlockEntity ticker,
                                                  Runnable unit) {
-        TreeMap<Long, List<Runnable>> buckets = beBuckets;
+        TreeMap<Long, List<BeTickUnit>> buckets = beBuckets;
         if (buckets == null || level != beLevel) {
             return false;
         }
@@ -384,7 +412,14 @@ public final class RegionizedTicking {
         if (region == null) {
             beTail.add(unit);
         } else {
-            buckets.computeIfAbsent(region.id(), k -> new ArrayList<>()).add(unit);
+            // Type lookup goes through the live block entity: a removed
+            // ticker reports null and is treated as wide-reach (serial tail),
+            // which is the conservative side of the choice.
+            var be = level.getBlockEntity(pos);
+            boolean wide = be == null || WideReachBlockEntities.isWideReach(be.getType());
+            buckets.computeIfAbsent(region.id(), k -> new ArrayList<>())
+                    .add(new BeTickUnit(dev.weft.engine.region.ChunkKey.fromBlock(pos.getX(), pos.getZ()),
+                            wide, unit));
             beBucketRegions.putIfAbsent(region.id(), region);
         }
         return true;
@@ -425,6 +460,43 @@ public final class RegionizedTicking {
         return lastEntityPartitionThreads.clone();
     }
 
+    /** Thread names per bucket of the most recent block-entity section. */
+    public static String[] lastBlockEntityPartitionThreads() {
+        return lastBlockEntityPartitionThreads.clone();
+    }
+
+    /** Whether block-entity sharding is engaged (RFC-0008). */
+    public static boolean isSharded() {
+        return sharded;
+    }
+
+    // --- RFC-0008 block-entity sharding probes (E2 gate) ---
+
+    public static long shardedSections() {
+        return BlockEntityShards.shardedSections();
+    }
+
+    public static long shardedUnits() {
+        return BlockEntityShards.shardedUnits();
+    }
+
+    public static long shardWideReachUnits() {
+        return BlockEntityShards.wideReachUnits();
+    }
+
+    public static long shardPasses() {
+        return BlockEntityShards.shardPasses();
+    }
+
+    /** Thread names of the most recent sharded section's tasks (fan-out probe). */
+    public static String[] lastShardThreads() {
+        return BlockEntityShards.lastShardThreads();
+    }
+
+    public static int lastMaxConcurrentShards() {
+        return BlockEntityShards.lastMaxConcurrentShards();
+    }
+
     /** Extra detail for the posture report / {@code /weft status} (R5). */
     public static String statusDetail() {
         long e = entitySections.sum();
@@ -440,7 +512,8 @@ public final class RegionizedTicking {
                         partitionedSections.sum(), unmappedUnits.sum(), lastEntityPartition.length)
                 : "increment 1 ticking (whole level, serial, server thread)";
         String mail = mailRouted ? "; " + OwnerMail.summary() : "";
-        return mode + ": " + sections + "; " + RegionTopology.summary() + mail;
+        String shards = sharded ? "; " + BlockEntityShards.summary() : "";
+        return mode + ": " + sections + "; " + RegionTopology.summary() + mail + shards;
     }
 
     private static long ownerId(ServerLevel level) {
