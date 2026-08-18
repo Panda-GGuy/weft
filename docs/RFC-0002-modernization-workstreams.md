@@ -29,7 +29,28 @@ Entities far from any player tick their expensive parts (AI/brain, pathfinding
 triggers, sensors) at reduced frequency — e.g. full rate within 32 blocks,
 1/4 rate to 64, 1/20 beyond — while movement/physics stay per-tick so nothing
 visibly freezes. Pufferfish's *dynamic activation of brain* proved this class
-of optimization on Paper; no clean NeoForge equivalent exists.
+of optimization on Paper.
+
+**Corrected 2026-08-18 (RESEARCH-0003 errata E1).** This paragraph previously
+ended "no clean NeoForge equivalent exists." That is wrong as written.
+ServerCore ships **Entity Activation Range** on NeoForge 1.21.1 — a
+Spigot/Paper-semantics port that gates an out-of-range entity's *whole* tick
+down to one full tick every `tick-interval` (default 20). The narrower and
+defensible claim:
+
+> The **vanilla-parity-preserving** variant — throttling AI frequency
+> (sensing, goal/target selectors) while movement, navigation, brains and
+> despawn accounting stay per-tick — has no NeoForge equivalent. The
+> **behavior-diverging** whole-tick-gating variant does, and is widely
+> installed.
+
+That distinction is WS-1's actual product position, and it is what the
+32-block behavior-parity gate below exists to defend. ServerCore's own docs
+warn its activation range "can still slow down mobfarms and break very
+specific technical contraptions"; the feature ships disabled by default.
+Coexistence: `servercore` carries `activation = "yield"` in
+`weft-neighbors.toml` (RFC-0003 rung 2 — one subsystem, one owner), covered by
+the R7 boot matrix. See RESEARCH-0001 §1.1 for the evidence trail.
 
 - Home: `weft-services` (new module) + mixin hooks in `weft-neoforge`.
 - Engine side: pure-Java `ActivationScheduler` — distance tiers, per-type
@@ -41,6 +62,17 @@ of optimization on Paper; no clean NeoForge equivalent exists.
 - Acceptance: benchmark world with 2k passive + 500 hostile entities shows
   ≥30% entity-phase reduction with no visible behavior change within 32
   blocks of a player; parity suite green.
+- **Acceptance criterion under review, unchanged pending sign-off.** The
+  ≥30% figure is not reachable by the parity-preserving technique: AI
+  sub-attribution measures the whole AI step at ~19–20% of the entity phase,
+  and `ws1EntityPhaseReduction` has tracked 15–21.5% (latest 18.6%) against
+  the 30% bar. ServerCore is the existence proof that ≥30% is available *only*
+  by giving up vanilla parity. RESEARCH-0003 §4.2 proposes an
+  `ActivationPolicy` SPI and a split criterion — ≥30% for an explicitly
+  opt-in aggressive tier, a separately stated realistic target for the
+  parity-preserving default. **That is a product decision and this criterion
+  does not change until it is signed off.** Until then the bar stays as
+  written and `ws1EntityPhaseReduction` stays optional-until-met (WS-8).
 
 ### WS-2: Async read-mostly services (the RFC-0001 P1 items)
 Pathfinding and spawn-density scanning move off-thread behind the Weft API.
@@ -78,12 +110,32 @@ NEON via one portable API), with scalar fallbacks:
    players explore" cost. Batch-evaluate noise lattices per chunk section.
 2. **Entity broad-phase collision** — AABB overlap tests against the WS-5
    SoA mirror, N-lane at a time.
-3. **Light propagation batches** where vanilla's engine leaves room.
+3. ~~**Light propagation batches** where vanilla's engine leaves room.~~
+   **CONTESTED — default posture is yield (2026-08-18, RESEARCH-0003 errata
+   E10).** ScalableLux (Starlight-derived, LGPL-3.0, modid `scalablelux`)
+   occupies this lane on Weft's exact platform and additionally performs
+   *parallel* light updates. `weft-neighbors.toml` carries
+   `ws4_light = "yield"` for it as seed data. Do not build WS-4.3 unless a
+   profiler signal on a real pack says the remaining headroom justifies it;
+   if it is ever built, it yields on `scalablelux` presence. Honest caveat on
+   the other side: ScalableLux's NeoForge 1.21.1 builds are pre-release
+   (`0.1.0+beta.1/2+neoforge`), so "mature on this platform" overstates it —
+   the lane is contested, not closed.
+
+   Separately, and independent of whether anyone installs ScalableLux: the
+   light engine is an **open audit item for P2**, not just a compat note. See
+   RFC-0006 §3, hazard 19 (candidate).
 
 - Home: `weft-simd` module (isolated because incubator modules need
   `--add-modules`; degrade gracefully when absent).
 - Acceptance: JMH shows ≥3x on noise kernels vs vanilla scalar; end-to-end
-  chunk-gen throughput ≥1.5x on the exploration benchmark.
+  chunk-gen throughput ≥1.5x on the exploration benchmark. (WS-4.3 is excluded
+  from this criterion while contested — see above.)
+- Note on WS-4.1: **Noisium** optimizes the same worldgen math algorithmically
+  on NeoForge 1.21.1. This is the one overlap where "both run" may genuinely
+  be faster, since WS-4.1 is SIMD on the same kernels. It needs a profiler
+  number before yield-vs-compose can be decided; deliberately left open rather
+  than guessed, and no posture is seeded for it.
 
 ### WS-5: Data-oriented entity mirror + off-heap chunk storage (FFM)
 Structure-of-arrays mirror of hot entity state (position, velocity, AABB,
@@ -127,6 +179,16 @@ ops tooling and is the adoption wedge for server admins.
 
 - Acceptance: dashboard renders all panels against a live server; overhead
   unmeasurable at 10s scrape interval.
+- **Scope settled 2026-08-18 (RESEARCH-0003 errata E3/§4.1): WS-7 stays as
+  written.** RESEARCH-0001 §7 action 2 proposed rescoping this to "emit into
+  existing tooling"; that recommendation is withdrawn, because `spark-api` is
+  read-only (six accessors on `Spark`, no registration path) and no NeoForge
+  1.21.1 exporter exists to emit into. Build the endpoint. Emit standard
+  **OpenMetrics text** so the existing Prometheus/Grafana stack consumes it
+  with no Weft-specific tooling — integration through the wire format, not
+  through an API nobody offers. The one-way `spark-api` *read* (WS-6.2's GC
+  data, and a `/weft report` MSPT cross-check) is a separate soft dependency;
+  `tps()`/`mspt()` are `@Nullable`, so a null path is required.
 
 ### WS-8: Benchmark-as-CI
 JMH suite for engine hot paths (mailboxes, region merge/split, LPT scheduling,

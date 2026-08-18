@@ -29,6 +29,25 @@ jobs:
           - neighbor: asyncpathfinding
             # Rung 2: a dedicated async-pathfinding mod owns WS-2's territory.
             expectations: 'pathfinding +YIELDED|to asyncpathfinding'
+          - neighbor: servercore
+            # Rung 2, two territories. Entity Activation Range gates an
+            # out-of-range entity's whole tick (Spigot/Paper semantics), which is
+            # strictly wider than WS-1's AI-frequency throttling; and their
+            # mob-spawning section mediates the mobcap inputs P1's spawn-density
+            # service constructs. activationScheduling is enabled in the cell so
+            # the WS-1 conflict actually resolves (a module that is off has no
+            # territory claim); spawnDensityMode already defaults to
+            # AUTHORITATIVE.
+            expectations: 'activation +YIELDED|to servercore|spawn_density +YIELDED'
+            weft_config: 'activationScheduling = true'
+          - neighbor: scalablelux
+            # Rung 1: a Starlight-derived light engine touches neither the
+            # profiler nor spawn state, so both must stay ACTIVE and name it as a
+            # cooperating neighbor - this cell's job is catching an *accidental*
+            # yield. Its ws4_light row is inert until WS-4.3 exists, and its
+            # regionized_ticking posture is deliberately unset pending RFC-0006's
+            # light-engine audit item; extend this cell when either lands.
+            expectations: 'profiler +ACTIVE|cooperating with scalablelux|spawn_density +ACTIVE'
           - neighbor: forgia
             # Rung 4: a tick-ownership engine. regionizedTicking is enabled in
             # the cell's config so the conflict actually resolves (a module

@@ -9,6 +9,13 @@ re-derives what's still genuinely unclaimed.
 **Method:** Live web research (Modrinth/CurseForge mod pages, GitHub repos,
 project READMEs) conducted this session. Everything below is dated; re-check
 before treating any of it as permanent.
+**Revised 2026-08-18** (second pass, errata E1–E5 from RESEARCH-0003 §5):
+§1 ServerCore and the WS-1 openness claim (→ §1.1), §4/§7 action 2 (WS-7
+rescope, withdrawn), §7.1 (survey gaps). **Download figures throughout this
+document are from the first pass and were NOT re-verified** — Modrinth and
+CurseForge were unreachable from the verifying session's network. Treat every
+"NNM+" number here as a first-pass figure of unknown currency, and re-verify
+before citing any of them publicly.
 
 ---
 
@@ -22,9 +29,10 @@ cooperate-tier neighbors:
   Fabric/NeoForge/Quilt) — general tick-logic algorithmic speedups.
 - **[FerriteCore](https://modrinth.com/mod/ferrite-core)** (70M+) —
   memory/registry dedup.
-- **[ServerCore](https://modrinth.com/mod/servercore)** (6M+,
-  Fabric/Forge/NeoForge) — breeding caps, async login, entity limits,
-  dynamic view distance.
+- **ServerCore** — **moved out of this layer, see §1.1.** This entry
+  originally read "breeding caps, async login, entity limits, dynamic view
+  distance," which omitted the two features that put it squarely in Weft's
+  territory (errata E2).
 - **[ModernFix](https://modrinth.com/mod/modernfix)** (42M+) — startup time,
   memory, cross-loader bug fixes.
 - **[Clumps](https://modrinth.com/mod/clumps)** (18M+) — XP orb merging.
@@ -36,9 +44,10 @@ cooperate-tier neighbors:
   expensive per-tick AI calculations (entity look-angle helper, optional
   AI-behavior disables). It is **not** what RFC-0002's WS-1 is — it's a
   same-thread caching optimization, not distance-tiered activation
-  throttling, and it does not multithread anything. WS-1 (distance-based AI
-  throttling, Pufferfish-DAB-style) has **no existing NeoForge equivalent**.
-  Confirmed open.
+  throttling, and it does not multithread anything. **This bullet originally
+  concluded that WS-1 has "no existing NeoForge equivalent. Confirmed open."
+  That was wrong as written — see §1.1 for the corrected, narrower claim
+  (errata E1).**
 
 Also referenced for context: **[Memory Leak
 Fix](https://modrinth.com/mod/memoryleakfix)**,
@@ -50,7 +59,61 @@ run — see §4).
 Survey source: [10 Best Minecraft Server Optimization Mods for 2026
 (wisehosting.com)](https://wisehosting.com/blog/10-best-minecraft-server-optimization-mods).
 
-No changes needed here; nothing above touches Weft's actual territory.
+Everything still listed above is genuinely non-competitive. The original
+closing line — "nothing above touches Weft's actual territory" — was wrong
+about one entry, corrected next.
+
+### 1.1 Correction (2026-08-18): ServerCore is a neighbor, not a bystander
+
+Verified this pass against ServerCore's own repository at branch `ver/1.21.1`
+(the branch targeting MC 1.21.1 / NeoForge 21.1.230; modid `servercore`, MIT,
+Fabric + NeoForge), reading `docs/config/DEFAULT.md` and the module layout —
+no source was read or copied.
+
+ServerCore ships **Entity Activation Range**, described by its own docs as
+"a port based off of Spigot's and PaperMC's implementation, but more
+configurable." Mechanically: an out-of-range entity's *whole* tick is gated
+down to one full tick every `tick-interval` (default 20), with a cheap
+per-type inactive tick in between and immunity exceptions
+(`activation-range: 16`, `wakeup-interval: -1`, `skip-non-immune: false`).
+Movement and physics do not run on a skipped tick. It also ships **Dynamic
+Performance Checks**, which retune `MOBCAP_PERCENTAGE`,
+`CHUNK_TICK_DISTANCE`, `SIMULATION_DISTANCE` and `VIEW_DISTANCE` against a
+`target-mspt: 35`, and a `mob-spawning` section that mediates vanilla's
+mobcap values with no enable flag of its own.
+
+So two Weft territories are occupied, not zero: **WS-1** (entity activation)
+and the **P1 spawn-density service** (which constructs the `SpawnState`
+vanilla consumes). Both now carry explicit `yield` postures in
+`weft-neighbors.toml`, and both are covered by the R7 neighbor-boot matrix.
+
+**The corrected WS-1 claim.** Not "nobody does this on NeoForge," but:
+
+> The **vanilla-parity-preserving** variant of distance-tiered activation has
+> no NeoForge equivalent. The **behavior-diverging** variant — whole-tick
+> gating, which reaches the movement/physics majority of entity cost by
+> giving up parity — is a shipped, widely-installed feature.
+
+That is a narrower differentiation claim, and it is still a real one. Two
+facts verified this pass keep it real:
+
+1. **ServerCore's activation range ships disabled** (`enabled: false`), as do
+   its Dynamic Performance Checks. It is an opt-in trade an operator makes
+   knowingly, and its own docs warn it "can still slow down mobfarms and
+   break very specific technical contraptions." WS-1 is gated by a hard
+   32-block behavior-parity test (`ws1BehaviorParityNearPlayers`) instead.
+2. **Nobody has shipped the parity-preserving variant on this platform.**
+   ServerCore has a `feature/dynamic-brain-activation` branch — "Added
+   experimental port of Dynamic Brain Activation (from pufferfish)" — whose
+   last commit is **2022-07-28**, and no `brain`/DAB sources exist on either
+   `ver/1.21.1` or `main`. Somebody tried this exact technique here and it
+   never shipped.
+
+This also explains WS-1's measurement ceiling rather than leaving it a
+mystery: the whole AI step is only ~19–20% of the entity phase, so a ≥30%
+entity-phase bar is unreachable while movement stays per-tick. See
+RESEARCH-0003 §4.2 for the proposed split of that acceptance criterion —
+a product decision, not a documentation fix.
 
 ## 2. Networking/worldgen concurrency — real gap, partially closed by a shim
 
@@ -164,12 +227,33 @@ Framework](https://www.curseforge.com/minecraft/mc-mods/maykeshs-server-observab
 overhead) and [Observable](https://modrinth.com/mod/observable) (a
 LagGoggles successor, Forge/Fabric, tile-entity/tick-time profiling), plus
 client-side profilers like [TaskManager](https://modrinth.com/mod/taskmanager).
-**WS-7 should be
-rescoped from "build a Prometheus exporter" to "emit Weft's region/graph/
-GC-attribution telemetry in a format these existing tools can already
-consume,"** or integrate directly with one of them. Building a competing
-exporter from scratch would be pure duplicated effort in an already-served
-space.
+This section originally recommended that ~~WS-7 be rescoped from "build a
+Prometheus exporter" to "emit into these existing tools."~~ **That
+recommendation is WITHDRAWN (errata E3, 2026-08-18).** It assumed an ingest
+path that does not exist:
+
+- `spark-api` is **read-only**. Its entire published surface is six accessors
+  (`cpuProcess`, `cpuSystem`, `tps`, `mspt`, `gc`, `placeholders`) on the
+  `Spark` interface, obtained via `SparkProvider.get()`. There is no
+  registration, no custom-statistic entry point — verified against the
+  `spark-api` sources 2026-08-18. Weft's region/lane/graph attribution cannot
+  be pushed into spark at any price.
+- Exporter coverage on Weft's *exact* platform is thin: the CurseForge
+  Prometheus Exporter's latest NeoForge build is 1.21.4, FabricExporter is
+  Fabric-only, UnifiedMetrics has no 1.21.1.
+
+**RFC-0002 WS-7 as written is the correct scope and needs no change.** The one
+refinement worth keeping from the original instinct is about *format*, not
+about another mod's API: emit standard **OpenMetrics text at a scrape
+endpoint**, so the existing Prometheus/Grafana stack consumes it with zero
+Weft-specific tooling. That achieves "integrate with the ecosystem" through
+the wire format rather than through an integration that isn't offered.
+
+The *other* direction is real and worth taking: consume `spark-api` as a
+**soft** dependency where it helps (WS-6.2's GC data, and a `/weft report`
+cross-check against the MSPT number admins already trust). Note `tps()` and
+`mspt()` are declared `@Nullable` — spark can be present and still decline to
+answer, so a null path is required, not optional. See RESEARCH-0003 §2.1/§4.1.
 
 ## 5. JVM/GC tooling — still genuinely open
 
@@ -184,21 +268,26 @@ differentiated** — this is real, low-competition territory.
 | Area | Competitive state | Weft's position |
 |---|---|---|
 | Same-thread algorithmic (Lithium/FerriteCore/etc.) | Mature, saturated | Cooperate, don't compete (RFC-0003) |
-| Distance-tiered AI throttling (WS-1) | Confirmed open on NeoForge | Differentiated |
+| Distance-tiered AI throttling (WS-1) | **Parity-preserving variant open on NeoForge; behavior-diverging whole-tick variant shipped by ServerCore** (§1.1, errata E1/E2) | Differentiated, narrowly |
 | Networking/worldgen concurrency | Fabric-only, but reachable via Sinytra Connector | Out of scope; minor future option |
 | Regionized tick threading | **4 active competitors**, 1 (Eturlia) materially advanced | Contested — win on safety model + graph layer, not on "first to regionize" |
 | Auto mod-safety classification + graceful degradation | **Unsolved by every competitor** — all use manual allowlists | Weft's sharpest differentiator |
 | Cross-chunk mod-network graph layer (Create/AE2/Mekanism) | **Unsolved everywhere**, including by the most advanced competitor | Weft's sharpest differentiator |
 | Pre-adoption profiler (try before you switch) | No equivalent found | Weft's sharpest differentiator |
-| Observability/Prometheus | Mature, multiple existing tools | Integrate, don't rebuild (rescope WS-7) |
+| Observability/Prometheus | Mature, but **no ingest path on NeoForge 1.21.1** — `spark-api` is read-only (errata E3) | Build WS-7 as written; integrate via the OpenMetrics *format*, and consume `spark-api` one-way |
 | JVM/GC doctor tooling | Confirmed open | Differentiated (WS-6) |
 
 ## 7. Recommended next actions
 
 1. Update RFC-0003's neighbor table with the four named regionization
    projects as explicit Tier-3 entries.
-2. Rescope WS-7 in RFC-0002 from "build an exporter" to "integrate with the
-   existing Prometheus/Grafana ecosystem."
+2. ~~Rescope WS-7 in RFC-0002 from "build an exporter" to "integrate with the
+   existing Prometheus/Grafana ecosystem."~~ **WITHDRAWN 2026-08-18 (errata
+   E3) — do not re-action this.** `spark-api` is read-only and no NeoForge
+   1.21.1 exporter exists to emit into; RFC-0002 WS-7 as written is correct.
+   The surviving refinement is a format choice (OpenMetrics text at a scrape
+   endpoint) plus a soft `spark-api` *read* dependency. See §4 above and
+   RESEARCH-0003 §4.1.
 3. When writing any public-facing description of Weft going forward (README,
    wiki, release notes), lead with the safety-net + graph-layer
    differentiation rather than "regionized threading for NeoForge" alone —
@@ -208,6 +297,29 @@ differentiated** — this is real, low-competition territory.
    specifically — if either ships real automatic compat detection or a graph-
    layer equivalent, that's a signal to revisit this document immediately,
    not wait for the next scheduled pass.
+
+## 7.1 Known gaps in this survey (errata E4, 2026-08-18)
+
+Four NeoForge 1.21.1 mods this pass omitted entirely, recorded here so the
+omission is visible rather than implied-absent. **Modids for all four are
+unverified** — do not add any of them to `weft-neighbors.toml` until read out
+of actual jar metadata (a wrong modid never matches and the registry silently
+looks like it works):
+
+| Mod | What | Weft overlap | Status |
+|---|---|---|---|
+| ScalableLux | Starlight-derived light engine, **parallel light updates on by default** | **WS-4.3** | Registered as `scalablelux`, modid verified from `fabric.mod.json` on `ver/1.21.1`. See RESEARCH-0003 §3.2 |
+| Noisium | Algorithmic worldgen optimization | **WS-4.1** (SIMD noise — same math, different layer) | Open. Needs a profiler number before yield-vs-compose can be decided; do not guess |
+| Radium | Unofficial Lithium fork for NeoForge | Same territory as `lithium` | Open, modid unverified |
+| Saturn | Memory-usage optimization | Adjacent to **WS-5** | Open, modid unverified |
+
+Also worth a named row eventually, for a *parity* reason rather than a
+performance one: **Faster Random** (archived 2025-12-27) replaces
+`RandomSource` implementations, which is exactly what RFC-0006 does when
+server levels swap to `ThreadSafeLegacyRandomSource` for parallel regions.
+Two mods replacing the same RNG is a silent-divergence failure mode, the worst
+category under "correctness is never opt-in." Modid unverified — verify before
+seeding any posture.
 
 ## 8. Sources
 

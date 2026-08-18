@@ -41,4 +41,50 @@ class ShippedNeighborRegistryTest {
         assertEquals(Map.of("forgia", Posture.REFUSE),
                 registry.posturesFor("legacy_lane", everyone));
     }
+
+    /**
+     * RESEARCH-0003 §3 rows added 2026-08-18. Both modids were read out of jar
+     * metadata on the branch targeting MC 1.21.1 — a wrong modid never matches
+     * and the registry silently looks like it works, so pin them here.
+     */
+    @Test
+    void serverCoreYieldsActivationAndSpawnDensity() throws IOException {
+        NeighborRegistry registry = shipped();
+        Set<String> present = Set.of("servercore");
+        assertEquals(Map.of("servercore", Posture.YIELD),
+                registry.posturesFor("activation", present));
+        assertEquals(Map.of("servercore", Posture.YIELD),
+                registry.posturesFor("spawn_density", present));
+    }
+
+    /**
+     * ScalableLux cooperates with everything Weft registers today and yields
+     * WS-4.3's lane. Its {@code regionized_ticking}/{@code entity_sharding}
+     * postures are deliberately UNSET pending RFC-0006's light-engine audit item
+     * (hazard 19 candidate) — asserted absent so a future edit that seeds an
+     * untested posture there has to come through this test.
+     */
+    @Test
+    void scalableLuxCooperatesAndLeavesP2PosturesUnset() throws IOException {
+        NeighborRegistry registry = shipped();
+        Set<String> present = Set.of("scalablelux");
+        assertEquals(Map.of("scalablelux", Posture.COOPERATE),
+                registry.posturesFor("profiler", present));
+        assertEquals(Map.of("scalablelux", Posture.COOPERATE),
+                registry.posturesFor("spawn_density", present));
+        assertEquals(Map.of("scalablelux", Posture.YIELD),
+                registry.posturesFor("ws4_light", present));
+        assertEquals(Map.of(), registry.posturesFor("regionized_ticking", present),
+                "regionized_ticking posture must stay unset until the light-engine audit closes");
+        assertEquals(Map.of(), registry.posturesFor("entity_sharding", present),
+                "entity_sharding posture must stay unset until the light-engine audit closes");
+    }
+
+    private static NeighborRegistry shipped() throws IOException {
+        var stream = NeighborRegistry.class.getResourceAsStream("/weft-neighbors.toml");
+        assertNotNull(stream, "weft-neighbors.toml missing from resources");
+        try (var reader = new InputStreamReader(stream, StandardCharsets.UTF_8)) {
+            return NeighborRegistry.parse(reader);
+        }
+    }
 }

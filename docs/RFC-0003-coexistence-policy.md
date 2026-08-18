@@ -66,20 +66,64 @@ Weft keeps delivering value with the overlapped piece parked.
 
 ## 3. Current known-neighbor postures (seed data for R3)
 
-| Neighbor | Overlapping Weft module | Default posture |
-|---|---|---|
-| Alternate Current | WS-3 redstone compilation | Yield |
-| Krypton / equivalents | WS-9 network egress | Yield |
-| C2ME | Worldgen scheduling (WS-4 noise stays — different layer) | Yield scheduler, keep SIMD kernels if hookable, else yield both |
-| Lithium-family / ServerCore | Per-target: yield only colliding mixin territories | Cooperate, targeted yields |
-| ModernFix | None material | Cooperate |
-| spark | P0 profiler (both observe fine) | Cooperate |
-| Moonrise | None material — same-thread entity/chunk/collision optimization, no tick-ownership claim (self-reports compatible with Lithium/FerriteCore) | Cooperate |
-| Forgia | Tick ownership (NeoForge-native Folia port) | Refuse (Tier 3) |
-| NeoFolia | Tick ownership (NeoForge-native Folia port) | Refuse (Tier 3) |
-| Foliage | Tick ownership (NeoForge Folia hybrid) | Refuse (Tier 3) |
-| Eturlia | Tick ownership (Folia/Paper core + NeoForge loader hybrid — different runtime shape, but same region-threading claim on the tick) | Refuse (Tier 3) |
-| Other threading engines | Tick ownership | Refuse (Tier 3) |
+**This table is prose; `weft-neighbors.toml` is the data R3 actually resolves
+against (R3: "data, not code").** Where the two disagree, the registry wins at
+runtime and this table is the bug. The `modid` column exists so that
+disagreement is visible instead of silent — a row with an unconfirmed modid is
+a posture *decision* that is not yet *enforced*, because a wrong or missing
+modid never matches and the registry looks like it works.
+
+For the consolidated view — what each neighbor is, why the posture is what
+it is, and which mods deliberately have *no* row — see
+[RESEARCH-0004](RESEARCH-0004-neighbor-landscape.md).
+
+| Neighbor | modid (in registry?) | Overlapping Weft module | Default posture |
+|---|---|---|---|
+| Alternate Current | `alternate_current` ✅ | WS-3 redstone compilation | Yield |
+| Dedicated async-pathfinding mods | `asyncpathfinding`, `async_pathfinding` ✅ (best-effort seeds) | WS-2 async pathfinding — one subsystem, one owner | Yield |
+| spark | `spark` ✅ | P0 profiler (both observe fine); Weft additionally *reads* `spark-api` one-way where present | Cooperate |
+| Lithium-family | `lithium` ✅ | Per-target: yield only colliding mixin territories | Cooperate, targeted yields |
+| **ServerCore** | `servercore` ✅ | **Entity Activation Range → WS-1** (strictly wider: whole-tick gating vs AI-frequency throttling); **`mob-spawning` + Dynamic Performance Checks → P1 spawn-density** (both construct/mediate the mobcap inputs) | **Yield on both.** Deliberately conservative — their activation range ships disabled and §4 forbids reading a neighbor's config, so modid presence is all Weft can see. R4 force-enable is the escape hatch |
+| **ScalableLux** | `scalablelux` ✅ | **WS-4.3 light propagation batching** (their lane). Nothing else Weft registers today | Yield `ws4_light`; Cooperate on profiler + spawn_density. **`regionized_ticking` posture deliberately UNSET** pending RFC-0006 hazard 19 — its parallel light updates are *on by default* (`parallelism` defaults to auto = `max(1, cores/3)`) and the interaction with worker-side block mutation is untested by either project |
+| Moonrise | `moonrise` ❌ **not in registry** | Was recorded "None material." **Narrowed 2026-08-18:** true for P0/P1 (same-thread entity/collision work, no tick-ownership claim, self-reports compatible with Lithium/FerriteCore). **Not established for P2** — Moonrise ports a *chunk system rewrite* and *Starlight*, and RFC-0006 hazards 1–4 build Weft's worker chunk read path directly on vanilla `ServerChunkCache` internals. See RFC-0006 hazard 20 (candidate) | Cooperate for P0/P1. **P2 posture unset** — do not seed one until hazard 20 closes |
+| Krypton / equivalents | ❌ modid unconfirmed | WS-9 network egress | Yield (decided, **not enforced**) |
+| C2ME | ❌ modid unconfirmed (Fabric-only at the mod level; NeoForge only via Connector) | Worldgen scheduling (WS-4 noise stays — different layer) | Yield scheduler, keep SIMD kernels if hookable, else yield both (decided, **not enforced**) |
+| ModernFix | ❌ modid unconfirmed | None material | Cooperate (= registry default for unknown mods, so absence is harmless here) |
+| Forgia | `forgia` ✅ | Tick ownership (NeoForge-native Folia port) | Refuse (Tier 3) |
+| NeoFolia | `neofolia` ✅ | Tick ownership (NeoForge-native Folia port) | Refuse (Tier 3) |
+| Foliage | `foliage` ✅ | Tick ownership (NeoForge Folia hybrid) | Refuse (Tier 3) |
+| Eturlia | `eturlia` ✅ | Tick ownership (Folia/Paper core + NeoForge loader hybrid — different runtime shape, but same region-threading claim on the tick) | Refuse (Tier 3) |
+| Other threading engines | — (Tier-3 mixin-overlap scan is the backstop) | Tick ownership | Refuse (Tier 3) |
+
+### 3.1 Registry drift, and how it is closed (errata E7, 2026-08-18)
+
+The drift RESEARCH-0003 E7 flagged is real and was **bidirectional**. Measured
+delta at `1f217cd`:
+
+- **In the table, absent from the registry (5):** Krypton, C2ME, ModernFix,
+  ServerCore, Moonrise.
+- **In the registry, absent from the table (1 concept, 2 modids):** the
+  dedicated async-pathfinding yield (`asyncpathfinding`, `async_pathfinding`).
+
+Closed in the truthful direction, which is not "seed everything":
+
+1. **Added to the registry**, modids read out of actual jar metadata on the
+   branch targeting MC 1.21.1: `servercore`, `scalablelux`. Both are covered by
+   the R7 boot matrix and pinned by `ShippedNeighborRegistryTest`.
+2. **Added to the table:** the async-pathfinding row above.
+3. **Marked, not invented:** Krypton, C2ME and ModernFix keep their decided
+   postures and are labelled modid-unconfirmed. Two of the three are
+   additionally inert today — Krypton's overlap is WS-9, which does not exist,
+   and ModernFix's posture (`cooperate`) is already the registry default for
+   unknown mods. Seeding a guessed modid would look like coverage while
+   matching nothing; that is the failure mode this column exists to prevent.
+4. **Narrowed, not re-postured:** Moonrise. Its modid *is* verified
+   (`moonrise`, `Tuinity/Moonrise` branch `mc/1.21.1`, real `neoforge` module,
+   GPLv3), but the audit finding above means no P2 posture is seeded for it.
+
+Standing rule this establishes: **a row may not enter `weft-neighbors.toml`
+without (a) a modid read from `neoforge.mods.toml` / `fabric.mod.json`, and
+(b) an R7 matrix cell that boots it.** Postures nobody has booted are prose.
 
 ## 4. What we deliberately do NOT build
 

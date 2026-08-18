@@ -116,9 +116,40 @@ Region-confined by construction (no treatment needed): per-section
 for *ownership*; see hazard 17 for why that did not imply thread-safety),
 container contents, per-entity state, per-region interactions (damage,
 pushing, targeting — nothing reaches across a ≥ mergeDistance gap in one
-tick). Thread-safe by design (no treatment needed): `ThreadedLevelLightEngine`
-(mailbox enqueue), Netty sends (per-channel queues), the engine's own
-mailboxes and counters.
+tick). Thread-safe by design (no treatment needed): Netty sends (per-channel
+queues), the engine's own mailboxes and counters.
+
+`ThreadedLevelLightEngine` **was** in that list, cleared on the one-line
+grounds "mailbox enqueue." That clearance is withdrawn pending evidence — see
+§3.1.
+
+### 3.1 Open audit items (candidate hazards, 2026-08-18)
+
+Every numbered row above cites decompiled 1.21.1/NeoForge evidence. The two
+items below do not yet, so they are **candidates, not findings** — recorded
+here rather than left implicit. Both are closed by the same decompile pass
+increment 7 already needs (RFC-0007 §4's `ServerLevel.tick` go/no-go audit),
+and neither blocks anything today because `parallelRegions` is default-OFF.
+
+| # | Structure | Why it is open | What closes it |
+|---|---|---|---|
+| **19** (candidate) | **The light engine** — `ThreadedLevelLightEngine` and the path from a worker-side block write to a light-update enqueue | This RFC cleared it by assertion, not by the per-structure decompile every numbered row above rests on. The assertion covers the *enqueue* being a mailbox; it does not establish that the pre-enqueue bookkeeping between `LevelChunk.setBlockState` and that mailbox is free of shared mutable state, nor that any batching buffer on the way in is thread-safe. Worker-side block mutation is exactly what §2's model introduces | Decompile the write→enqueue path for 1.21.1: is every structure touched between a worker's `setBlockState` and the mailbox either per-call, per-thread, or synchronized? If not, it is a numbered hazard with a strategy. If yes, re-clear it *with* the evidence |
+| **20** (candidate) | **A neighbor replacing the chunk system** under hazards 1–4 | Hazards 1–4's strategy is specifically "resolve via `getVisibleChunkIfPresent` → `ChunkHolder.getChunkIfPresent(FULL)`, because the visible-chunk map is a volatile snapshot the parked main thread isn't mutating." That argument is about **vanilla `ServerChunkCache` internals**. Moonrise ports a chunk-system rewrite (its README lists "Chunk system rewrite" among the Paper patches it carries) and is co-installable on NeoForge 1.21.1. If it replaces those internals, the safety argument does not transfer, and the failure modes are hazard 1's deadlock or hazard 3's silent wrongness | Either establish that Weft's worker read path is expressed against a surface Moonrise preserves, or make `moonrise` + `parallelRegions` an R7 matrix cell with a posture. Until then no P2 posture is seeded for `moonrise` (RFC-0003 §3) |
+
+Why both surfaced now, and why they are worth the row: this is the same shape
+as hazard 18 (`Level.getBlockEntity` returning `null` off-thread), which hid
+for two increments because the `p2parallel` rig held block entities that never
+asked the level about a neighbour. A structure cleared by reasoning rather than
+by a rig that exercises it is exactly where the next hazard 18 lives.
+
+External corroboration that the light-engine item is not hypothetical, though
+it is **not the reason** for filing it (the audit gap stands with zero mods
+installed): ScalableLux — Starlight-derived, `1.21.1` on Fabric with a NeoForge
+port branch — ships a `ThreadedLevelLightEngineMixin`, i.e. it rewrites this
+exact class, and its `parallelism` setting defaults to auto
+(`max(1, availableProcessors() / 3)`), so its parallel light updates are on by
+default rather than opt-in. Moonrise carries Starlight too. Two co-installable
+neighbors modify the class this RFC waved through.
 
 Known gaps carried forward (documented, gated OFF-by-default):
 teleports *within* a level to another region's chunks (ender pearls crossing
@@ -149,6 +180,8 @@ rest of the module. The safety mixins live in the fail-loud config
 never a silently-unsafe parallel mode. The RNG swap and the synchronization
 mixins are active regardless of the flag (identical single-threaded
 semantics, uncontended-lock cost only); the worker chunk path, deferral, and
-fan-out engage only with the flag. Exit criteria to default-ON remain: the
+fan-out engage only with the flag. **§3.1's candidate hazards 19 and 20 are
+added to the default-ON exit criteria**: `parallelRegions` does not flip
+default-ON with either still open. Exit criteria to default-ON remain: the
 full parity suite green at declared classes, chaos + R7 green, and the
 Create/AE2 soak clean under the flag.

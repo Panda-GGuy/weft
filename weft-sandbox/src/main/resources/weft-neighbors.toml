@@ -64,3 +64,67 @@ legacy_lane = "refuse"
 regionized_ticking = "refuse"
 entity_sharding = "refuse"
 legacy_lane = "refuse"
+
+# --------------------------------------------------------------------------
+# Added 2026-08-18 (RESEARCH-0003 sec. 3, verified against primary sources this
+# pass). Both modids were read out of actual jar metadata on the branch that
+# targets Weft's platform, not out of a doc.
+# --------------------------------------------------------------------------
+
+[servercore]
+# modid from neoforge/src/main/resources/META-INF/neoforge.mods.toml on
+# Wesley1808/ServerCore branch ver/1.21.1 (MC 1.21.1, NeoForge 21.1.230, MIT).
+#
+# Entity Activation Range is a Spigot/Paper-semantics port: an out-of-range
+# entity's *whole* tick is gated down to one full tick every `tick-interval`
+# (default 20), with a cheap per-type inactive tick in between (their
+# activation_range/inactive_ticks/ mixin set) and immunity exceptions. Movement
+# and physics do not run on a skipped tick - which is exactly why it reaches the
+# movement/physics majority of entity cost, and exactly why it diverges from
+# vanilla (their own docs: "can still slow down mobfarms and break very specific
+# technical contraptions"). Strictly wider than WS-1, which throttles AI
+# frequency only and keeps movement per-tick. One subsystem, one owner: theirs
+# runs (RFC-0003 rung 2).
+#
+# Deliberately conservative. Their feature ships `activation-range.enabled:
+# false`, and RFC-0003 sec. 4 forbids reading a neighbor's config, so modid
+# presence is all Weft can see. An operator running ServerCore with activation
+# range off can force-enable WS-1 through forceEnableModules (R4) - logged as
+# user-chosen. Over-yielding is the safe direction here: two activation
+# throttles stacked on one subsystem compound their behavior divergence, and
+# WS-1's own 32-block parity gate would be measuring a world ServerCore is
+# already altering.
+activation = "yield"
+# Their `mob-spawning` section mediates vanilla's mobcap values with no enable
+# flag of its own - always active, shipped values equal to vanilla's - and their
+# optional Dynamic Performance Checks additionally retune MOBCAP_PERCENTAGE
+# against `target-mspt: 35`. Weft's P1 service constructs the SpawnState vanilla
+# reads and is authoritative by default. Two owners of one input, and the
+# failure report reads "spawning is broken" with neither mod's log mentioning
+# the other. Unlike `activation` above, this overlap is unconditional.
+spawn_density = "yield"
+
+[scalablelux]
+# modid from src/main/resources/fabric.mod.json on RelativityMC/ScalableLux
+# branch ver/1.21.1 (MC 1.21.1, LGPL-3.0-only). NeoForge 1.21.1 exists as
+# branch port/neoforge/1.21.1 and ships only as pre-release
+# (0.1.0+beta.1+neoforge, 0.1.0+beta.2+neoforge).
+# Note: on Fabric its fabric.mod.json also declares provides = ["starlight"];
+# if a `starlight` row is ever added here, it must not double-match.
+#
+# A Starlight-derived light engine. It does not touch the tick loop, the
+# profiler, or spawn state - rung 1 for everything Weft registers today.
+profiler = "cooperate"
+spawn_density = "cooperate"
+# WS-4.3 (light propagation batching, RFC-0002 WS-4) is their territory on
+# Weft's exact platform. Seed data: no Weft module registers `ws4_light` yet, so
+# this row is inert until WS-4 lands - same status as `ws3_redstone` above.
+ws4_light = "yield"
+# regionized_ticking / entity_sharding: posture deliberately UNSET, pending
+# RFC-0006 sec. 3's light-engine audit item (hazard 19 candidate). ScalableLux's
+# `parallelism` key in config/scalablelux.properties defaults to -1, which
+# resolves to max(1, availableProcessors() / 3) - so its parallel light updates
+# are ON by default, not opt-in. Worker-side block mutation under
+# `parallelRegions` enqueues light work, and that interaction has been verified
+# by neither project. Unknown modules default to cooperate; do not seed a
+# posture here until the audit closes.
