@@ -90,7 +90,7 @@ public class VanillaParityGameTests {
         LegacyRouting.setActive(false);
 
         List<SortedMap<String, String>> digests = new ArrayList<>();
-        long[] sectionsAtActivation = new long[5];
+        long[] sectionsAtActivation = new long[7];
 
         helper.runAfterDelay(SETTLE_TICKS, () -> {
             ParityScenario.reset(level, base);
@@ -137,12 +137,19 @@ public class VanillaParityGameTests {
             // serial fast path (fan-out needs >=2 buckets) — the parallel
             // code path must have zero residue at bucket-count <= 1.
             RegionizedTicking.setParallel(true);
+            // Increment 6 rides along as well: owner-mail routing is live,
+            // but nothing in an all-vanilla arena posts positional mail —
+            // zero routed tasks, zero fallbacks, still bit-identical (the
+            // engagement proof lives in the p2mail gate, RFC-0007 §3.5).
+            RegionizedTicking.setMailRouting(true);
             sectionsAtActivation[0] = RegionizedTicking.entitySections();
             sectionsAtActivation[1] = RegionizedTicking.blockEntitySections();
             sectionsAtActivation[2] =
                     LegacyRouting.deferredBlockEntities() + LegacyRouting.deferredEntities();
             sectionsAtActivation[3] = RegionizedTicking.partitionedSections();
             sectionsAtActivation[4] = RegionizedTicking.unmappedUnits();
+            sectionsAtActivation[5] = dev.weft.neoforge.regiontick.OwnerMail.routedToRegion();
+            sectionsAtActivation[6] = dev.weft.neoforge.regiontick.OwnerMail.inlineFallback();
             ParityScenario.reset(level, base);
             ParityScenario.build(level, base);
         });
@@ -158,6 +165,10 @@ public class VanillaParityGameTests {
             long partitionedSections =
                     RegionizedTicking.partitionedSections() - sectionsAtActivation[3];
             long unmapped = RegionizedTicking.unmappedUnits() - sectionsAtActivation[4];
+            long mailRouted =
+                    dev.weft.neoforge.regiontick.OwnerMail.routedToRegion() - sectionsAtActivation[5];
+            long mailFallbacks =
+                    dev.weft.neoforge.regiontick.OwnerMail.inlineFallback() - sectionsAtActivation[6];
             tearDown(level, base);
 
             if (!RegionizedTicking.hooksApplied()) {
@@ -184,6 +195,14 @@ public class VanillaParityGameTests {
             if (unmapped != 0) {
                 helper.fail("Partitioner leaked " + unmapped + " units into the unmapped tail - "
                         + "a ticking chunk had no topology region (RFC-0001 §4.2 invariant)");
+            }
+            // Increment 6 zero-residue guard: nothing in an all-vanilla arena
+            // posts positional mail, so an active router must have touched
+            // nothing (RFC-0007 §3.5).
+            if (mailRouted != 0 || mailFallbacks != 0) {
+                helper.fail("Owner-mail routing touched an all-vanilla arena: " + mailRouted
+                        + " routed, " + mailFallbacks + " fallbacks (expected 0/0 - phantom "
+                        + "positional traffic, RFC-0007 §3.5)");
             }
             // Vacuous-run guard: this level ticks once per server tick, so the
             // engine must have owned at least ~RUN_TICKS sections of each kind.

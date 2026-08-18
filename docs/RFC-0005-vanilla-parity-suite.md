@@ -131,7 +131,17 @@ wrong.
   (zombies + sheep).
 - Increment 1 (`regionizedTicking`, default off) is judged at **E0** and
   green locally and nightly (see README Status for dated numbers).
+- Increment 6 (`ownerMailRouting`, default off) is judged at **E0**: routing
+  changes *where* owner mail is applied (the owning region's bucket head
+  instead of global INGEST), not what any unit computes. The delivery
+  contract is "before the owner's simulation each tick," documented in
+  RFC-0007 §3.2 — a note here because a future mail client sensitive to
+  pre-entity vanilla steps (weather, scheduled ticks) would need E-class
+  judgment of its own; every current client is provably indifferent.
 - E1/E2 canonicalization and conservation capture are not yet implemented —
   they land with the increments that need them, never later than them.
+  Free-running regions in v1 (RFC-0007) deliberately stays within E0/E1;
+  a genuinely new class (temporally-decoupled comparison) is only needed by
+  v2's per-region TPS isolation, which RFC-0001 §4.3 defers.
 
 *End of RFC-0005 draft 1.*

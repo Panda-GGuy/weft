@@ -24,10 +24,12 @@ import org.slf4j.Logger;
  * work now routes through it — WS-1 throttles distant-mob AI in place, and
  * WS-2 computes mob paths on Weft workers with results delivered through the
  * scheduler's mailbox ({@link #postToOwner}) at the next tick boundary.
- * Regions still carry no chunks, so the region phases tick empty and owner
- * routing resolves to the global inbox, drained on the server thread at
- * INGEST — the same ownership path that becomes region-mail once later P2
- * increments assign real chunks. P2 increment 1 ({@code regionizedTicking},
+ * The scheduler's own region phases still tick empty (its RegionManager is
+ * the owner-id reservation counter only); since P2 increment 6
+ * ({@code ownerMailRouting}, RFC-0007 §3) INGEST additionally routes
+ * positionally-owned results onward to the owning topology region's own
+ * mailbox, drained at that region's bucket head — target-less work keeps
+ * the global-inbox path. P2 increment 1 ({@code regionizedTicking},
  * default off) routes vanilla's entity/block-entity tick sections through
  * {@code WeftScheduler.runOwnedSerial} — serial, server thread, vanilla
  * order — establishing tick ownership with bit-identical semantics; see

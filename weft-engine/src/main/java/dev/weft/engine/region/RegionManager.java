@@ -1,5 +1,7 @@
 package dev.weft.engine.region;
 
+import dev.weft.engine.mail.Message;
+
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -10,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 
 /**
  * Owns the chunk→region mapping. All mutation of the mapping happens between
@@ -40,6 +43,21 @@ public final class RegionManager {
      * removal — whole-map BFS every recompute was the dominant churn cost.
      */
     private final Set<Region> maybeSplit = new HashSet<>();
+
+    /**
+     * Where a region's queued mail goes when its mailbox can no longer be
+     * trusted to reach the right owner (RFC-0007 §3.3): the region split — a
+     * message routed for a position now in the split-off region would drain
+     * under the parent's context, racing the new owner — or the region
+     * emptied and is being dropped. Merges do NOT come here: {@link #absorb}
+     * reposts the victim's mail into the absorber, which owns the victim's
+     * chunks from that point on. The loader wires this to the scheduler's
+     * global inbox (always-safe delivery, one tick late, rare by the churn
+     * fix's split economics); the default no-op matches today's behavior for
+     * managers that never carry mail (the scheduler's own id-reservation
+     * manager).
+     */
+    private Consumer<Message> strandedMailSink = m -> {};
 
     public RegionManager(int mergeDistance, long worldSeed) {
         if (mergeDistance < 1) {
@@ -100,6 +118,11 @@ public final class RegionManager {
         return nextRegionId.getAndIncrement();
     }
 
+    /** RFC-0007 §3.3: receives queued mail from split or dropped regions. */
+    public void setStrandedMailSink(Consumer<Message> sink) {
+        this.strandedMailSink = sink;
+    }
+
     /** Unload a chunk. Caller should run {@link #recomputeSplits()} afterwards. */
     public void removeChunk(int chunkX, int chunkZ) {
         long key = ChunkKey.pack(chunkX, chunkZ);
@@ -109,6 +132,7 @@ public final class RegionManager {
             if (r.chunks().isEmpty()) {
                 regions.remove(r);
                 maybeSplit.remove(r);
+                r.mailbox().drain().forEach(strandedMailSink);
             } else {
                 r.reseed();
                 if (!maybeSplit.contains(r) && splitPossibleAfterRemoval(chunkX, chunkZ)) {
@@ -135,6 +159,12 @@ public final class RegionManager {
             if (components.size() <= 1) {
                 continue;
             }
+            // Queued mail can no longer be matched to the component that owns
+            // its target position (Message.Task is opaque), so all of it goes
+            // to the stranded sink — conservative, always-safe, and rare
+            // (RFC-0007 §3.3 hazard 2). The split regions start with the
+            // empty mailboxes their constructor gives them.
+            r.mailbox().drain().forEach(strandedMailSink);
             // Keep the largest component in place; move the rest out.
             components.sort((a, b) -> Integer.compare(b.size(), a.size()));
             for (int i = 1; i < components.size(); i++) {
