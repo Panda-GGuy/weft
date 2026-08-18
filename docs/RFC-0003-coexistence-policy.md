@@ -98,7 +98,7 @@ it is, and which mods deliberately have *no* row — see
 ### 3.1 Registry drift, and how it is closed (errata E7, 2026-08-18)
 
 The drift RESEARCH-0003 E7 flagged is real and was **bidirectional**. Measured
-delta at `1f217cd`:
+delta at `cd39aed`:
 
 - **In the table, absent from the registry (5):** Krypton, C2ME, ModernFix,
   ServerCore, Moonrise.

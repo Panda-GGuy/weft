@@ -579,7 +579,7 @@ session did not have.
 Every claim this document makes about a third party was re-derived from that
 party's own repository (branch-pinned, jar metadata and config docs only — no
 source was read for its implementation, and nothing was copied), and every
-claim about Weft was re-derived from this repo at `28bcb3d`. Method note: the
+claim about Weft was re-derived from this repo at `de6d6be`. Method note: the
 verifying session could reach `github.com` and `raw.githubusercontent.com` but
 **not** `modrinth.com`, `api.modrinth.com` or `curseforge.com`, so no download
 count or published-version matrix in this document set is verified. Branch-level

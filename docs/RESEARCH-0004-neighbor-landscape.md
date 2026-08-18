@@ -17,10 +17,10 @@ each project's branch targeting MC 1.21.1. Nothing was copied from any
 project's implementation — see §5.
 
 **Sources.** `docs/RESEARCH-0001-performance-mod-landscape-2026.md` (competitor
-survey), `docs/RESEARCH-0002-moonrise-methodology-study.md` (`a3b9350`),
-`docs/RESEARCH-0003-integration-hooks-and-errata.md` (`28bcb3d`, living
+survey), `docs/RESEARCH-0002-moonrise-methodology-study.md` (`e8ca6e7`),
+`docs/RESEARCH-0003-integration-hooks-and-errata.md` (`de6d6be`, living
 document + errata on our own prior research), `docs/RFC-0003-coexistence-policy.md`
-(`1f217cd` added the Moonrise row; §3/§3.1 rewritten 2026-08-18),
+(`cd39aed` added the Moonrise row; §3/§3.1 rewritten 2026-08-18),
 `weft-sandbox/src/main/resources/weft-neighbors.toml` (the data R3 resolves).
 
 **Verify before you cite.** Everything below is a dated claim about a moving
