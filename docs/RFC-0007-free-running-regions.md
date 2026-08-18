@@ -39,7 +39,7 @@ the equivalence claims stay inside RFC-0005's existing E0/E1 classes (§3.5,
 
 ## 2. The mail model today (evidence)
 
-Two facts, both verified in the code as of merge 8973061, define the problem:
+Two facts, both verified in the code as of merge cf9bb78, define the problem:
 
 - **There are two `RegionManager` universes.** The scheduler's own manager
   (`WeftMod.regions`) is deliberately empty — it exists to reserve owner ids
@@ -120,7 +120,7 @@ Mail can sit in a region's mailbox across a topology mutation. Every case:
 | # | Event | Hazard | Treatment |
 |---|---|---|---|
 | 1 | Merge (`absorb`) | Victim's queued mail must follow its chunks | Already handled: `absorb` drains the victim's mailbox into the absorber, in order |
-| 2 | Split (`recomputeSplits`) | A task routed for position P sits in the parent's mailbox while P moves to the split region; parent and split buckets may run concurrently next section | `RegionManager` gains a **stranded-mail sink**: on split, the parent's queued mail is drained to the sink (loader wires it to the global inbox). Global-inbox tasks run at INGEST on the server thread — always safe, one tick late, and splits are rare (churn fix c2fd0df made them provably rare) |
+| 2 | Split (`recomputeSplits`) | A task routed for position P sits in the parent's mailbox while P moves to the split region; parent and split buckets may run concurrently next section | `RegionManager` gains a **stranded-mail sink**: on split, the parent's queued mail is drained to the sink (loader wires it to the global inbox). Global-inbox tasks run at INGEST on the server thread — always safe, one tick late, and splits are rare (churn fix edfff01 made them provably rare) |
 | 3 | Empty-region removal (`removeChunk` → region dropped) | Queued mail dropped silently | Same sink: drain to global on removal |
 | 4 | Region unmapped at post time (unloaded chunk, despawned mob) | No target | Global fallback at post time, counted (`routedGlobalFallback`) |
 | 5 | Flag layering: routing on but no bucket ever drains (partitioning off) | Stranded mail forever | `ownerMailRouting` **requires** `partitionedTicking` (resolved by `applyActive` like `parallelRegions`); with partitioning inactive, positional posts fall back to global. Deactivation mid-run drains every region mailbox to global once (same reasoning as the legacy lane's unconditional drain) |

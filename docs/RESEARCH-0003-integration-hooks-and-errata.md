@@ -384,7 +384,7 @@ intact while letting the ecosystem carry the maintenance load.
 
 ## 5. Errata — fact-check of the existing document set
 
-Verified against live primary sources and the repo state at `1f217cd`
+Verified against live primary sources and the repo state at `cd39aed`
 (2026-08-18). "Correct" means checked, not merely unchallenged.
 
 | # | Document | Claim | Verdict |
