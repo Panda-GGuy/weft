@@ -10,6 +10,7 @@ import net.minecraft.world.level.chunk.status.ChunkStatus;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
@@ -47,7 +48,7 @@ public abstract class ServerChunkCacheWorkerReadMixin {
             return;
         }
         ChunkHolder holder = this.getVisibleChunkIfPresent(ChunkPos.asLong(x, z));
-        ChunkAccess chunk = holder != null ? holder.getChunkIfPresent(status) : null;
+        ChunkAccess chunk = holder != null ? weft$resolve(holder, status) : null;
         if (chunk != null) {
             cir.setReturnValue(chunk);
         } else if (!load) {
@@ -65,7 +66,36 @@ public abstract class ServerChunkCacheWorkerReadMixin {
             return;
         }
         ChunkHolder holder = this.getVisibleChunkIfPresent(ChunkPos.asLong(x, z));
-        ChunkAccess chunk = holder != null ? holder.getChunkIfPresent(ChunkStatus.FULL) : null;
+        ChunkAccess chunk = holder != null ? weft$resolve(holder, ChunkStatus.FULL) : null;
         cir.setReturnValue(chunk instanceof LevelChunk levelChunk ? levelChunk : null);
+    }
+
+    /**
+     * Resolve a holder to the chunk a worker may read.
+     *
+     * <p>At {@code FULL} this deliberately asks for the <b>ticking</b> chunk
+     * rather than {@code getChunkIfPresent(FULL)}. The two are not
+     * interchangeable: {@code getChunkIfPresent} reads
+     * {@code GenerationChunkHolder}'s per-status future — the chunk as the
+     * <em>generation pipeline</em> produced it — while {@code getTickingChunk}
+     * returns the live {@link LevelChunk} the server is actually simulating.
+     * Asking for the live chunk is the correct thing for a worker that is
+     * about to read simulation state, so the change stands on its own.
+     *
+     * <p><b>Honest scope: this did NOT fix the open p2parallelcap crash</b>
+     * (workers seeing {@code null} from {@code level.getBlockEntity} for a
+     * chest that exists). The crash reproduces unchanged with this in place,
+     * so a stale generation-pipeline chunk instance is ruled out as its
+     * cause.
+     */
+    @Unique
+    private ChunkAccess weft$resolve(ChunkHolder holder, ChunkStatus status) {
+        if (status == ChunkStatus.FULL) {
+            LevelChunk ticking = holder.getTickingChunk();
+            if (ticking != null) {
+                return ticking;
+            }
+        }
+        return holder.getChunkIfPresent(status);
     }
 }

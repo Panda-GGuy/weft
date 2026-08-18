@@ -272,6 +272,148 @@ public class PartitionedTickingGameTests {
         });
     }
 
+    /**
+     * Does increment 5 (parallel regions, already on main) survive block
+     * entities that use NeoForge's <em>capability</em> path?
+     *
+     * <p>Motivation, and why this is not paranoia: the RFC-0008 sharding
+     * attempt crashed with an NPE inside
+     * {@code VanillaInventoryCodeHooks.extractHook} —
+     * {@code ChestBlock.getContainer} returned null, i.e.
+     * {@code level.getBlockEntity} answered null for a chest that exists,
+     * on a worker thread. RFC-0006's audit enumerated vanilla structures
+     * but never the modding platform's capability layer, and the existing
+     * {@code p2parallel} gate cannot have caught it: its rig is furnaces and
+     * armour stands, neither of which resolves an item-handler capability.
+     * Hoppers do, every tick. If concurrent region buckets are enough to
+     * reproduce it, the hazard is not sharding-specific and increment 5
+     * needs an audit entry.
+     */
+    @GameTest(template = "empty", batch = "p2parallelcap", timeoutTicks = 1600)
+    public void parallelRegionsWithCapabilityBlockEntities(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        BlockPos ground = WeftBenchGameTests.groundOrigin(helper);
+        BlockPos columnA = new BlockPos(ground.getX() - 96, 0, ground.getZ() + 96);
+        BlockPos columnB = new BlockPos(columnA.getX(), 0,
+                columnA.getZ() + ISLAND_GAP_CHUNKS * 16);
+        WeftBenchGameTests.forceChunks(level, columnA, true);
+        WeftBenchGameTests.forceChunks(level, columnB, true);
+        BlockPos baseA = surfaceBase(level, columnA);
+        BlockPos baseB = surfaceBase(level, columnB);
+
+        ActivationHooks.setActive(false);
+        PathfindingHooks.setActive(false);
+        SpawnDensityHooks.setActive(false);
+        RegionizedTicking.setActive(false);
+        LegacyRouting.setActive(false);
+
+        int[] control = new int[2];
+
+        // Control phase FIRST (RFC-0005 §3): the rig must work under plain
+        // vanilla ticking before concurrency may be blamed for anything.
+        helper.runAfterDelay(SETTLE_TICKS, () -> {
+            buildHopperBank(level, baseA);
+            buildHopperBank(level, baseB);
+        });
+
+        helper.runAfterDelay(SETTLE_TICKS + RUN_TICKS, () -> {
+            control[0] = hopperBankDelivered(level, baseA);
+            control[1] = hopperBankDelivered(level, baseB);
+            if (control[0] == 0 || control[1] == 0) {
+                demolishHopperBank(level, baseA);
+                demolishHopperBank(level, baseB);
+                tearDown(level, baseA, baseB);
+                helper.fail("Control failed: hoppers delivered nothing under VANILLA ticking (A="
+                        + control[0] + " B=" + control[1] + ") - the rig is broken, so it cannot "
+                        + "judge parallel execution");
+            }
+            demolishHopperBank(level, baseA);
+            demolishHopperBank(level, baseB);
+            buildHopperBank(level, baseA);
+            buildHopperBank(level, baseB);
+            RegionizedTicking.setActive(true);
+            RegionizedTicking.setPartitioned(true);
+            RegionizedTicking.setParallel(true);
+        });
+
+        helper.runAfterDelay(SETTLE_TICKS + 2 * RUN_TICKS, () -> {
+            int movedA = hopperBankDelivered(level, baseA);
+            int movedB = hopperBankDelivered(level, baseB);
+            String[] threads = RegionizedTicking.lastEntityPartitionThreads();
+            String serverThread = level.getServer().getRunningThread().getName();
+            demolishHopperBank(level, baseA);
+            demolishHopperBank(level, baseB);
+            tearDown(level, baseA, baseB);
+
+            // Reaching here at all is the headline result: no crash. Then the
+            // usual engagement guard, so a serial fallback can't pass silently.
+            boolean fannedOut = threads.length >= 2;
+            for (String thread : threads) {
+                if (thread == null || thread.equals(serverThread)) {
+                    fannedOut = false;
+                }
+            }
+            if (!fannedOut) {
+                helper.fail("Parallel fan-out never engaged (" + Arrays.toString(threads)
+                        + ") - this run did not actually test concurrent capability access");
+            }
+            if (movedA == 0 || movedB == 0) {
+                helper.fail("Hoppers delivered nothing (A=" + movedA + " B=" + movedB
+                        + ") - the capability path was never exercised");
+            }
+            helper.succeed();
+        });
+    }
+
+    /**
+     * Eight independent vertical hopper stacks: chest → hopper → chest.
+     * Spaced three blocks apart on purpose — chests placed side by side pair
+     * into <em>double</em> chests, which routes {@code ChestBlock.getContainer}
+     * through {@code DoubleBlockCombiner} and makes a null container an
+     * ordinary possibility rather than evidence of a race. The stacks must be
+     * independent for this test to mean what it claims.
+     */
+    private static void buildHopperBank(ServerLevel level, BlockPos base) {
+        for (int i = 0; i < 8; i++) {
+            BlockPos column = base.offset(1 + i * 3, 1, 1);
+            level.setBlock(column.below(1), Blocks.CHEST.defaultBlockState(), Block.UPDATE_CLIENTS);
+            level.setBlock(column, Blocks.HOPPER.defaultBlockState(), Block.UPDATE_CLIENTS);
+            level.setBlock(column.above(), Blocks.CHEST.defaultBlockState(), Block.UPDATE_CLIENTS);
+            if (level.getBlockEntity(column.above())
+                    instanceof net.minecraft.world.Container source) {
+                source.setItem(0, new ItemStack(Items.STICK, 48));
+            }
+        }
+    }
+
+    private static int hopperBankDelivered(ServerLevel level, BlockPos base) {
+        int total = 0;
+        for (int i = 0; i < 8; i++) {
+            if (level.getBlockEntity(base.offset(1 + i * 3, 0, 1))
+                    instanceof net.minecraft.world.Container dest) {
+                for (int slot = 0; slot < dest.getContainerSize(); slot++) {
+                    total += dest.getItem(slot).getCount();
+                }
+            }
+        }
+        return total;
+    }
+
+    private static void demolishHopperBank(ServerLevel level, BlockPos base) {
+        for (int i = 0; i < 8; i++) {
+            BlockPos column = base.offset(1 + i * 3, 1, 1);
+            for (int dy = -1; dy <= 1; dy++) {
+                BlockPos p = column.offset(0, dy, 0);
+                if (level.getBlockEntity(p) instanceof net.minecraft.world.Container c) {
+                    c.clearContent();
+                }
+                if (!level.getBlockState(p).isAir()) {
+                    level.setBlock(p, Blocks.AIR.defaultBlockState(), DEMOLISH_FLAGS);
+                }
+            }
+        }
+    }
+
     private static BlockPos surfaceBase(ServerLevel level, BlockPos column) {
         return new BlockPos(column.getX(),
                 level.getHeight(Heightmap.Types.MOTION_BLOCKING, column.getX(), column.getZ()),

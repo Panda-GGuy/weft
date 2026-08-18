@@ -21,6 +21,7 @@
     "parallel.PersistentEntitySectionManagerUuidMixin",
     "parallel.ChunkMapTrackerSyncMixin",
     "parallel.EntityChangeDimensionDeferMixin",
+    "parallel.LevelChunkBlockEntitySyncMixin",
     "shard.LevelShardDomainMixin"
   ],
   "injectors": {

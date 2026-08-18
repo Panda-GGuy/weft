@@ -60,8 +60,55 @@ Consequences:
 | 15 | `ProfilerFiller` captured by the entity consumer | Corrupt spans if `/debug` profiling is active | Documented unsupported with `parallelRegions` (normal runs use `InactiveProfiler` — no-op). Weft's own profiler is already server-thread-confined (P1 lesson) |
 | 16 | `LegacyLane.submit` from workers | FIFO order becomes scheduling-dependent | Submissions carry (regionId, seq); the drain sorts — deterministic §7.2 order restored |
 
+| 17 | `LevelChunk.getBlockEntity` — mutates `ChunkAccess.blockEntities` (fastutil `Object2ObjectOpenHashMap`) and `pendingBlockEntities` (`HashMap`) **on the read path**: drops removed entries, drains pending, and creates+registers on a miss under `IMMEDIATE` | Concurrent `get` against another thread's `put` on an open-addressing table returns `null` for a present key — a block entity vanishes mid-tick | Per-`LevelChunk` lock over the mutators **and** the reader (`LevelChunkBlockEntitySyncMixin`) |
+
+**Hazard 17 was missed by this audit's first pass and is recorded here as a
+correction** (added 2026-08-17, after increment 5 had merged). The audit
+below dismissed "per-chunk state … BE maps" as region-confined, which is
+true of *ownership* but not of *thread-safety*: the map is only ever touched
+by its own region, yet `getBlockEntity` is a **mutating** call and vanilla's
+own tick path invokes it constantly.
+
+### OPEN BUG — concurrent capability lookups (unresolved, 2026-08-17)
+
+Hazard 17 was found while chasing a crash that it does **not** explain, and
+which is still open. Stated plainly so nobody mistakes the audit for
+complete:
+
+Two regions ticking **hoppers** concurrently crash with a
+`NullPointerException` inside NeoForge's
+`VanillaInventoryCodeHooks.extractHook`: `ChestBlock.getContainer` is handed
+`null` by `level.getBlockEntity` for a chest that demonstrably exists, and
+wraps it in `new InvWrapper(null)`. Reproducer: the `p2parallelcap` gate,
+which runs the identical rig **serially first** and only then enables
+`parallelRegions` — the serial control passes and delivers items, so this is
+concurrency, not the rig.
+
+Eliminated so far, each by direct experiment:
+
+- **Double chests** — stacks are spaced three blocks apart, so no pairing;
+  crash unchanged.
+- **`LevelChunk.blockEntities` map corruption** — per-chunk lock over the
+  reader and both mutators (hazard 17's fix); crash unchanged.
+- **Stale chunk instance** — worker reads switched from
+  `getChunkIfPresent(FULL)` (the generation pipeline's view) to
+  `getTickingChunk()` (the live chunk); crash unchanged.
+
+Still open: NeoForge's capability resolution itself (provider caches,
+`BlockCapabilityCache` invalidation), and the block-state read path
+(`PalettedContainer`) that `createBlockEntity` consults. Note the outer
+`getItemHandlerAt` reads the same position as a chest microseconds earlier on
+the same thread, so whatever fails is not a stable property of the position.
+
+The generalizable lesson is already earned: *a gate proves the code paths its
+rig actually exercises, and vanilla content is not the same thing as vanilla
+coverage.* `p2parallel`'s furnaces and armour stands hold their own block-entity
+references and never ask the level for a neighbour, so nothing in the original
+rig could have caught this.
+
 Region-confined by construction (no treatment needed): per-section
-`ClassInstanceMultiMap`s, per-chunk state (palettes, heightmaps, BE maps),
+`ClassInstanceMultiMap`s, per-chunk state (palettes, heightmaps, BE maps —
+for *ownership*; see hazard 17 for why that did not imply thread-safety),
 container contents, per-entity state, per-region interactions (damage,
 pushing, targeting — nothing reaches across a ≥ mergeDistance gap in one
 tick). Thread-safe by design (no treatment needed): `ThreadedLevelLightEngine`
