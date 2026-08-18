@@ -44,6 +44,10 @@ public abstract class ServerLevelRegionTickMixin implements RegionizedEntityTick
                                            Operation<Void> original) {
         ServerLevel self = (ServerLevel) (Object) this;
         Consumer<Entity> effective = LegacyRouting.wrapEntityTicker(self, ticker);
-        RegionizedTicking.tickEntitySectionOwned(self, () -> original.call(list, effective));
+        // The BiConsumer is invoked exactly once, synchronously, inside
+        // tickEntitySection (MixinExtras contract); partitioned buckets only
+        // ever re-invoke vanilla's own consumer object, never the Operation.
+        RegionizedTicking.tickEntitySection(self, list, effective,
+                (l, c) -> original.call(l, c));
     }
 }

@@ -161,6 +161,18 @@ public final class WeftConfig {
                     "(RFC-0005) is green for every increment that changes semantics.")
             .define("regionizedTicking", false);
 
+    private static final ModConfigSpec.BooleanValue PARTITIONED_TICKING_SPEC = BUILDER
+            .comment("P2 increment 4 (RFC-0001 sec. 4.2/11): with regionizedTicking on,",
+                    "group each entity/block-entity section by the real chunk->region",
+                    "topology and tick bucket-by-bucket in canonical (ascending region id)",
+                    "order under each region's own id - STILL SERIAL, on the server thread.",
+                    "Vanilla order is preserved within each region; only cross-region",
+                    "interleaving changes, unobservable for regions >= mergeDistance apart.",
+                    "The execution shape of parallel regions with the concurrency removed;",
+                    "worker fan-out (class E1) is a later increment. No effect unless",
+                    "regionizedTicking is active.")
+            .define("partitionedTicking", false);
+
     private static final ModConfigSpec.BooleanValue LEGACY_LANE_SPEC = BUILDER
             .comment("P2 (RFC-0001 sec. 7.2): extract Tier-2 (unverified) mods' entity and",
                     "block-entity tick work from the vanilla sections and run it in the",
@@ -211,6 +223,7 @@ public final class WeftConfig {
     public static volatile boolean ENTITY_SHARDING = false;
     public static volatile int ENTITY_SHARD_MIN_BATCH = 64;
     public static volatile boolean REGIONIZED_TICKING = false;
+    public static volatile boolean PARTITIONED_TICKING = false;
     public static volatile boolean LEGACY_LANE = false;
     public static volatile Set<String> FORCE_ENABLE_MODULES = Set.of();
     public static volatile Set<String> FORCE_DISABLE_MODULES = Set.of();
@@ -264,6 +277,7 @@ public final class WeftConfig {
         ENTITY_SHARDING = ENTITY_SHARDING_SPEC.get();
         ENTITY_SHARD_MIN_BATCH = ENTITY_SHARD_MIN_BATCH_SPEC.get();
         REGIONIZED_TICKING = REGIONIZED_TICKING_SPEC.get();
+        PARTITIONED_TICKING = PARTITIONED_TICKING_SPEC.get();
         LEGACY_LANE = LEGACY_LANE_SPEC.get();
         FORCE_ENABLE_MODULES = Set.copyOf(FORCE_ENABLE_MODULES_SPEC.get());
         FORCE_DISABLE_MODULES = Set.copyOf(FORCE_DISABLE_MODULES_SPEC.get());

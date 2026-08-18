@@ -189,6 +189,33 @@ contract gate existing *before* parallel regions makes extraction
 load-bearing. Known gap, documented for the E1 increment: a legacy passenger
 riding a vanilla vehicle is ticked by the vehicle inline, not via the lane.
 
+**P2 increment 4 — partitioned region ticking, still serial** (2026-08-17,
+same day): behind `partitionedTicking` (default OFF, a sub-mode of
+`regionized_ticking`), each entity and block-entity section is now grouped
+by the **real chunk→region topology** and executed bucket-by-bucket in
+canonical (ascending region id) order, each bucket under a REGION
+thread-context carrying its **real region id** — the execution shape of
+parallel regions with the concurrency removed. Vanilla order is preserved
+*within* each region (RFC-0005 E0 explicitly covers "real chunk→region
+assignment while still serial"); only cross-region interleaving changes,
+which is unobservable for regions kept ≥ `mergeDistance` apart (RFC-0001
+§4.2's load-bearing invariant). Collection leans on vanilla's own machinery:
+`EntityTickList.forEach` freezes the iterated map, the per-entity consumer
+re-checks liveness at execution, removed BE tickers are null-ticker no-ops —
+so bucketed execution keeps vanilla's mid-tick spawn/removal semantics
+exactly. Gates: the parity anchor runs with partitioning **active** (a
+single-region arena must partition to one bucket in vanilla order — still
+bit-identical E0, with engagement and zero-unmapped-units guards), and a new
+hard gametest (`p2partition`) holds two islands 40 chunks apart to
+**per-island bit-identical end states** between inline and partitioned runs
+while asserting the buckets carried two distinct real region ids. What this
+increment deliberately does *not* do: run buckets on workers. True
+parallelism (E1) still needs the shared-structure audit — entity-section
+storage mutation, cross-region teleports, `level.random` draws, packet
+sends — plus owner-mail rerouting; serial partitioning has none of those
+hazards by construction and exists so the partition seam is proven before
+threads arrive.
+
 **RFC-0002/0003 workstreams started** (2026-08-16): every Weft optimization
 module now walks the [RFC-0003](docs/RFC-0003-coexistence-policy.md)
 coexistence ladder at startup — independent kill switch, known-neighbor

@@ -11,7 +11,7 @@
     "NaturalSpawnerMixin",
     "ServerLevelRegionTickMixin",
     "LevelRegionTickMixin",
-    "LevelLegacyBlockEntityTickMixin",
+    "LevelBlockEntityUnitMixin",
     "EntityCounterAccessor"
   ],
   "injectors": {

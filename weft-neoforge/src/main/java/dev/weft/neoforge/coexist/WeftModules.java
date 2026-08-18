@@ -93,7 +93,9 @@ public final class WeftModules {
                     // The ownership mixins are fail-loud (weft.mixins.json,
                     // R2's reserved case), so this is belt-and-braces.
                     RegionizedTicking::hooksApplied,
-                    RegionizedTicking::setActive,
+                    // applyActive also resolves the partitionedTicking sub-mode
+                    // (increment 4) from config; it is not a separate module.
+                    RegionizedTicking::applyActive,
                     RegionizedTicking::statusDetail),
             new Def("legacy_lane", "P2 legacy lane (Tier-2 tick extraction)",
                     () -> WeftConfig.LEGACY_LANE,

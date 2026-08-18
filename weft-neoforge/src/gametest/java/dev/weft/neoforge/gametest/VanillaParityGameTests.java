@@ -41,7 +41,11 @@ import java.util.SortedMap;
  *       lane (increment 3) is active too: with only vanilla content present,
  *       its classification wrap must extract <em>zero</em> units and leave
  *       the digest bit-identical — the lane's zero-residue-on-vanilla
- *       claim.</li>
+ *       claim. Partitioned ticking (increment 4) is active as well: the
+ *       arena occupies a single region, so per-region bucket execution must
+ *       preserve vanilla order exactly (still E0), with the partition
+ *       engagement and zero-unmapped guards making a silently-inert or leaky
+ *       partitioner unable to pass.</li>
  * </ol>
  *
  * <p>Hard gate ({@code required = true}): increment 1 is bit-identical by
@@ -86,7 +90,7 @@ public class VanillaParityGameTests {
         LegacyRouting.setActive(false);
 
         List<SortedMap<String, String>> digests = new ArrayList<>();
-        long[] sectionsAtActivation = new long[3];
+        long[] sectionsAtActivation = new long[5];
 
         helper.runAfterDelay(SETTLE_TICKS, () -> {
             ParityScenario.reset(level, base);
@@ -124,12 +128,17 @@ public class VanillaParityGameTests {
             }
             RegionizedTicking.setActive(true);
             // Increment 3 rides along: all-vanilla content, so the lane must
-            // stay empty while its classification wrap is live.
+            // stay empty while its classification wrap is live. Increment 4
+            // too: a single-region arena partitions to one bucket in vanilla
+            // order — still bit-identical, or the partitioner is buggy.
             LegacyRouting.setActive(true);
+            RegionizedTicking.setPartitioned(true);
             sectionsAtActivation[0] = RegionizedTicking.entitySections();
             sectionsAtActivation[1] = RegionizedTicking.blockEntitySections();
             sectionsAtActivation[2] =
                     LegacyRouting.deferredBlockEntities() + LegacyRouting.deferredEntities();
+            sectionsAtActivation[3] = RegionizedTicking.partitionedSections();
+            sectionsAtActivation[4] = RegionizedTicking.unmappedUnits();
             ParityScenario.reset(level, base);
             ParityScenario.build(level, base);
         });
@@ -142,6 +151,9 @@ public class VanillaParityGameTests {
                     RegionizedTicking.blockEntitySections() - sectionsAtActivation[1];
             long laneExtractions = LegacyRouting.deferredBlockEntities()
                     + LegacyRouting.deferredEntities() - sectionsAtActivation[2];
+            long partitionedSections =
+                    RegionizedTicking.partitionedSections() - sectionsAtActivation[3];
+            long unmapped = RegionizedTicking.unmappedUnits() - sectionsAtActivation[4];
             tearDown(level, base);
 
             if (!RegionizedTicking.hooksApplied()) {
@@ -156,6 +168,18 @@ public class VanillaParityGameTests {
             if (laneExtractions != 0) {
                 helper.fail("Legacy lane extracted " + laneExtractions + " units from an "
                         + "all-vanilla scenario - Tier-0 content routed to the lane (RFC-0001 §7.1)");
+            }
+            // Increment 4 guards: partitioned execution must actually have
+            // engaged (2 sections per tick), and every unit must have mapped
+            // to a real region (ticking chunks are a subset of loaded chunks).
+            if (partitionedSections < 2L * (RUN_TICKS - 16)) {
+                helper.fail("Vacuous partition run: only " + partitionedSections
+                        + " partitioned sections across " + RUN_TICKS
+                        + " ticks - partitionedTicking never actually engaged");
+            }
+            if (unmapped != 0) {
+                helper.fail("Partitioner leaked " + unmapped + " units into the unmapped tail - "
+                        + "a ticking chunk had no topology region (RFC-0001 §4.2 invariant)");
             }
             // Vacuous-run guard: this level ticks once per server tick, so the
             // engine must have owned at least ~RUN_TICKS sections of each kind.

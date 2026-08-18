@@ -479,9 +479,20 @@ server thread, vanilla order, settled world) with per-mod cost
 attribution; gated by the parity suite (lane active, zero extractions on
 vanilla content, still bit-identical E0) plus the p2legacy contract
 gametest (engagement, LEGACY context, attribution, bit-identical furnace
-end state vs. inline control). Next: parallel regions + owner-mail
-rerouting (E1), then WS-10 activation (E2) — each gated by the parity
-suite at its declared equivalence class.
+end state vs. inline control). Increment 4 (same day): partitioned region
+ticking behind `partitionedTicking` — sections grouped by the real
+chunk→region topology, executed bucket-by-bucket in canonical region-id
+order under real region ids, still serial on the server thread (E0: §4.2's
+mergeDistance invariant makes cross-region regrouping unobservable);
+gated by the parity suite (partitioning active on the single-region
+arena, engagement + zero-unmapped guards, still bit-identical) plus the
+p2partition two-island gametest (distinct real region ids in both
+partition probes, per-island bit-identical end states vs. inline
+control). Next: parallel regions proper — worker fan-out + the
+shared-structure audit (entity-section storage, cross-region teleports,
+level.random, packets) + owner-mail rerouting (E1), then WS-10
+activation (E2) — each gated by the parity suite at its declared
+equivalence class.
 
 ## 12. Risk register (top items)
 
