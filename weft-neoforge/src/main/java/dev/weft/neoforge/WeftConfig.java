@@ -173,6 +173,18 @@ public final class WeftConfig {
                     "regionizedTicking is active.")
             .define("partitionedTicking", false);
 
+    private static final ModConfigSpec.BooleanValue PARALLEL_REGIONS_SPEC = BUILDER
+            .comment("P2 increment 5 (RFC-0006, class E1): run partitioned buckets",
+                    "CONCURRENTLY on engine workers, barriered inside each vanilla tick",
+                    "section - the server thread waits; vanilla macro-order is unchanged.",
+                    "Per-region execution is bit-identical to serial; cross-region",
+                    "interleaving and a handful of cosmetic level.random draws are the",
+                    "documented order-canonicalized set (RFC-0006 sec. 4). Single-bucket",
+                    "sections (solo play: one region) take the serial path - zero new",
+                    "overhead. Requires partitionedTicking. Ships off until the parity",
+                    "suite, chaos, R7 and the Create/AE2 soak are green under the flag.")
+            .define("parallelRegions", false);
+
     private static final ModConfigSpec.BooleanValue LEGACY_LANE_SPEC = BUILDER
             .comment("P2 (RFC-0001 sec. 7.2): extract Tier-2 (unverified) mods' entity and",
                     "block-entity tick work from the vanilla sections and run it in the",
@@ -224,6 +236,7 @@ public final class WeftConfig {
     public static volatile int ENTITY_SHARD_MIN_BATCH = 64;
     public static volatile boolean REGIONIZED_TICKING = false;
     public static volatile boolean PARTITIONED_TICKING = false;
+    public static volatile boolean PARALLEL_REGIONS = false;
     public static volatile boolean LEGACY_LANE = false;
     public static volatile Set<String> FORCE_ENABLE_MODULES = Set.of();
     public static volatile Set<String> FORCE_DISABLE_MODULES = Set.of();
@@ -278,6 +291,7 @@ public final class WeftConfig {
         ENTITY_SHARD_MIN_BATCH = ENTITY_SHARD_MIN_BATCH_SPEC.get();
         REGIONIZED_TICKING = REGIONIZED_TICKING_SPEC.get();
         PARTITIONED_TICKING = PARTITIONED_TICKING_SPEC.get();
+        PARALLEL_REGIONS = PARALLEL_REGIONS_SPEC.get();
         LEGACY_LANE = LEGACY_LANE_SPEC.get();
         FORCE_ENABLE_MODULES = Set.copyOf(FORCE_ENABLE_MODULES_SPEC.get());
         FORCE_DISABLE_MODULES = Set.copyOf(FORCE_DISABLE_MODULES_SPEC.get());

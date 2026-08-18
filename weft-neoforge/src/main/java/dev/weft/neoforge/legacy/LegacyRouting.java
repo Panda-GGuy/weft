@@ -136,7 +136,8 @@ public final class LegacyRouting {
             EntityType<?> type = entity.getType();
             if (tierOfEntity(type) == CompatTier.LEGACY) {
                 deferredEntities.increment();
-                lane().submit(modIdOf(EntityType.getKey(type)), () -> vanilla.accept(entity));
+                lane().submit(modIdOf(EntityType.getKey(type)), submissionOrder(),
+                        () -> vanilla.accept(entity));
             } else {
                 vanilla.accept(entity);
             }
@@ -158,10 +159,21 @@ public final class LegacyRouting {
         String typeId = ticker.getType();
         if (tierOfBlockEntity(typeId) == CompatTier.LEGACY) {
             deferredBlockEntities.increment();
-            lane().submit(modIdOf(typeId), ticker::tick);
+            lane().submit(modIdOf(typeId), submissionOrder(), ticker::tick);
         } else {
             inline.run();
         }
+    }
+
+    /**
+     * Ordering group for lane submissions (RFC-0006 hazard 16): the current
+     * REGION owner id — the real region id inside a partitioned/parallel
+     * bucket, the level owner id in whole-level mode. Deterministic either
+     * way once the drain sorts by (regionOrder, seq).
+     */
+    private static long submissionOrder() {
+        dev.weft.engine.guard.ThreadContext ctx = dev.weft.engine.guard.ThreadContext.current();
+        return ctx.kind() == dev.weft.engine.guard.ThreadContext.Kind.REGION ? ctx.ownerId() : 0;
     }
 
     /** Units extracted since boot (parity vacuous-run guards + status). */

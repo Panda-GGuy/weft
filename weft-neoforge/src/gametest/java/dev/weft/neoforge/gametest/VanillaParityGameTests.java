@@ -133,6 +133,10 @@ public class VanillaParityGameTests {
             // order — still bit-identical, or the partitioner is buggy.
             LegacyRouting.setActive(true);
             RegionizedTicking.setPartitioned(true);
+            // Increment 5 rides along too: a single-region arena takes the
+            // serial fast path (fan-out needs >=2 buckets) — the parallel
+            // code path must have zero residue at bucket-count <= 1.
+            RegionizedTicking.setParallel(true);
             sectionsAtActivation[0] = RegionizedTicking.entitySections();
             sectionsAtActivation[1] = RegionizedTicking.blockEntitySections();
             sectionsAtActivation[2] =

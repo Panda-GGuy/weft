@@ -12,7 +12,15 @@
     "ServerLevelRegionTickMixin",
     "LevelRegionTickMixin",
     "LevelBlockEntityUnitMixin",
-    "EntityCounterAccessor"
+    "EntityCounterAccessor",
+    "parallel.ServerChunkCacheWorkerReadMixin",
+    "parallel.LevelParallelSafetyMixin",
+    "parallel.EntityTickListSyncMixin",
+    "parallel.EntityLookupSyncMixin",
+    "parallel.EntitySectionStorageSyncMixin",
+    "parallel.PersistentEntitySectionManagerUuidMixin",
+    "parallel.ChunkMapTrackerSyncMixin",
+    "parallel.EntityChangeDimensionDeferMixin"
   ],
   "injectors": {
     "defaultRequire": 1
