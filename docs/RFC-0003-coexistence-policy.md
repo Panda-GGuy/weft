@@ -74,6 +74,7 @@ Weft keeps delivering value with the overlapped piece parked.
 | Lithium-family / ServerCore | Per-target: yield only colliding mixin territories | Cooperate, targeted yields |
 | ModernFix | None material | Cooperate |
 | spark | P0 profiler (both observe fine) | Cooperate |
+| Moonrise | None material — same-thread entity/chunk/collision optimization, no tick-ownership claim (self-reports compatible with Lithium/FerriteCore) | Cooperate |
 | Forgia | Tick ownership (NeoForge-native Folia port) | Refuse (Tier 3) |
 | NeoFolia | Tick ownership (NeoForge-native Folia port) | Refuse (Tier 3) |
 | Foliage | Tick ownership (NeoForge Folia hybrid) | Refuse (Tier 3) |
