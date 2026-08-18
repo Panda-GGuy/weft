@@ -185,6 +185,31 @@ public final class WeftConfig {
                     "suite, chaos, R7 and the Create/AE2 soak are green under the flag.")
             .define("parallelRegions", false);
 
+    private static final ModConfigSpec.BooleanValue BLOCK_ENTITY_SHARDING_SPEC = BUILDER
+            .comment("P2 increment 7 / WS-10 (RFC-0008, class E2): shard a region's",
+                    "block-entity ticking ACROSS worker threads within one region - the",
+                    "solo-play lever, where region-level parallelism is a no-op because the",
+                    "world is one region. Safety is spatial: chunks are 2x2-colored and each",
+                    "color runs as its own barriered pass, so concurrently-ticking chunks are",
+                    "always >= 16 empty blocks apart - further than any short-reach block",
+                    "entity can touch (a hopper reaches one block). Types whose reach can",
+                    "exceed that (pistons, beacons, conduits, sculk, end gateways, trial",
+                    "spawners, vaults, bells) tick serially afterwards, and access outside a",
+                    "shard's own chunks trips a fail-loud counted guard.",
+                    "Documented behavior change (RFC-0004 sec. 2.5): block entities in",
+                    "ADJACENT chunks tick in different passes, so a hopper chain crossing a",
+                    "chunk border can move an item on a different tick than vanilla. Totals",
+                    "are conserved and the result is reproducible; vanilla's exact ordering",
+                    "is not preserved. Requires partitionedTicking. Ships off until the",
+                    "conservation (E2) gate and the throughput number are green.")
+            .define("blockEntitySharding", false);
+
+    private static final ModConfigSpec.IntValue BLOCK_ENTITY_SHARD_MIN_UNITS_SPEC = BUILDER
+            .comment("Block entities a region must be ticking before sharding engages;",
+                    "below this the region takes the serial path (fan-out would cost more",
+                    "than it saves).")
+            .defineInRange("blockEntityShardMinUnits", 64, 1, 100_000);
+
     private static final ModConfigSpec.BooleanValue OWNER_MAIL_ROUTING_SPEC = BUILDER
             .comment("P2 increment 6 (RFC-0007 sec. 3): deliver positionally-owned async",
                     "results (WS-2 path fills) to the owning region's OWN mailbox, drained",
@@ -248,6 +273,8 @@ public final class WeftConfig {
     public static volatile boolean REGIONIZED_TICKING = false;
     public static volatile boolean PARTITIONED_TICKING = false;
     public static volatile boolean PARALLEL_REGIONS = false;
+    public static volatile boolean BLOCK_ENTITY_SHARDING = false;
+    public static volatile int BLOCK_ENTITY_SHARD_MIN_UNITS = 64;
     public static volatile boolean OWNER_MAIL_ROUTING = false;
     public static volatile boolean LEGACY_LANE = false;
     public static volatile Set<String> FORCE_ENABLE_MODULES = Set.of();
@@ -304,6 +331,8 @@ public final class WeftConfig {
         REGIONIZED_TICKING = REGIONIZED_TICKING_SPEC.get();
         PARTITIONED_TICKING = PARTITIONED_TICKING_SPEC.get();
         PARALLEL_REGIONS = PARALLEL_REGIONS_SPEC.get();
+        BLOCK_ENTITY_SHARDING = BLOCK_ENTITY_SHARDING_SPEC.get();
+        BLOCK_ENTITY_SHARD_MIN_UNITS = BLOCK_ENTITY_SHARD_MIN_UNITS_SPEC.get();
         OWNER_MAIL_ROUTING = OWNER_MAIL_ROUTING_SPEC.get();
         LEGACY_LANE = LEGACY_LANE_SPEC.get();
         FORCE_ENABLE_MODULES = Set.copyOf(FORCE_ENABLE_MODULES_SPEC.get());

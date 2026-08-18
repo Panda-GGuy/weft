@@ -123,6 +123,24 @@ public final class WeftScheduler implements AutoCloseable {
         return ownedSerialSections.sum();
     }
 
+    /**
+     * Run one unit under an explicit ownership kind on the calling thread —
+     * the serial counterpart of
+     * {@link #runOwnedParallel(List, ThreadContext.Kind)}, used when a
+     * sharded pass has only one unit and fan-out would be pure overhead
+     * (RFC-0008 §3): the context must still be the shard's, so the
+     * single-unit path is not silently a different ownership claim.
+     */
+    public void runOwnedAs(ThreadContext.Kind kind, long ownerId, Runnable section) {
+        ThreadContext.enter(kind, ownerId);
+        try {
+            section.run();
+        } finally {
+            ThreadContext.exit();
+            ownedSerialSections.increment();
+        }
+    }
+
     /** One owned unit of a fanned-out section (P2 E1, RFC-0006 §2). */
     public record OwnedSection(long ownerId, Runnable work) {}
 
@@ -138,10 +156,22 @@ public final class WeftScheduler implements AutoCloseable {
      * crashing tick crashes the server, exactly as serially.
      */
     public void runOwnedParallel(List<OwnedSection> sections) {
+        runOwnedParallel(sections, ThreadContext.Kind.REGION);
+    }
+
+    /**
+     * As {@link #runOwnedParallel(List)}, but stamping each task with an
+     * explicit ownership {@code kind}. Intra-region block-entity sharding
+     * (RFC-0008) passes {@link ThreadContext.Kind#SHARD} with
+     * {@code ShardKey}-packed owner ids, so a shard task presents shard
+     * identity to the guards rather than borrowing its region's — the
+     * distinction RFC-0004 §2.2 exists to preserve.
+     */
+    public void runOwnedParallel(List<OwnedSection> sections, ThreadContext.Kind kind) {
         List<Future<?>> futures = new ArrayList<>(sections.size());
         for (OwnedSection section : sections) {
             futures.add(pool.submit(() -> {
-                ThreadContext.enter(ThreadContext.Kind.REGION, section.ownerId());
+                ThreadContext.enter(kind, section.ownerId());
                 try {
                     section.work().run();
                 } finally {

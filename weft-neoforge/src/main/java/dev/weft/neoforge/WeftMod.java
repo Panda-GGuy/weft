@@ -86,6 +86,14 @@ public final class WeftMod {
                 services.onEnteringSection(e);
             }
         });
+        // RFC-0005 class E2 conservation counters (WS-10's gate). Inert
+        // unless a parity run has started recording — one volatile read per
+        // event otherwise.
+        NeoForge.EVENT_BUS.addListener(dev.weft.neoforge.parity.ConservationLedger::onLivingDamage);
+        NeoForge.EVENT_BUS.addListener(dev.weft.neoforge.parity.ConservationLedger::onLivingDeath);
+        NeoForge.EVENT_BUS.addListener(dev.weft.neoforge.parity.ConservationLedger::onBabySpawn);
+        NeoForge.EVENT_BUS.addListener(dev.weft.neoforge.parity.ConservationLedger::onEntityJoin);
+        NeoForge.EVENT_BUS.addListener(dev.weft.neoforge.parity.ConservationLedger::onEntityLeave);
     }
 
     /**
