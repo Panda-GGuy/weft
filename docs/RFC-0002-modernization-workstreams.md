@@ -59,20 +59,63 @@ the R7 boot matrix. See RESEARCH-0001 §1.1 for the evidence trail.
   default-conservative.
 - Profiler tie-in: P0 already attributes cost per entity type; the report
   gains a "projected WS-1 savings" line.
-- Acceptance: benchmark world with 2k passive + 500 hostile entities shows
-  ≥30% entity-phase reduction with no visible behavior change within 32
-  blocks of a player; parity suite green.
-- **Acceptance criterion under review, unchanged pending sign-off.** The
-  ≥30% figure is not reachable by the parity-preserving technique: AI
-  sub-attribution measures the whole AI step at ~19–20% of the entity phase,
-  and `ws1EntityPhaseReduction` has tracked 15–21.5% (latest 18.6%) against
-  the 30% bar. ServerCore is the existence proof that ≥30% is available *only*
-  by giving up vanilla parity. RESEARCH-0003 §4.2 proposes an
-  `ActivationPolicy` SPI and a split criterion — ≥30% for an explicitly
-  opt-in aggressive tier, a separately stated realistic target for the
-  parity-preserving default. **That is a product decision and this criterion
-  does not change until it is signed off.** Until then the bar stays as
-  written and `ws1EntityPhaseReduction` stays optional-until-met (WS-8).
+- Acceptance, **split and signed off 2026-08-18** (see below): benchmark world
+  with 2k passive + 500 hostile entities, no visible behavior change within 32
+  blocks of a player, parity suite green, and a per-tier performance bar —
+  - **Parity-preserving tier** (`activationScheduling`, the shipped default):
+    **≥50% of the measured AI-step slice removed**, with a **≥10%
+    entity-phase floor**. Both are hard-gated in `WeftBenchGameTests`.
+  - **Aggressive tier** (opt-in whole-tick gating, not yet built): **≥30%
+    entity-phase reduction** — the original bar, kept intact and reattached to
+    the only technique that can reach it.
+
+#### Why the criterion split (signed off 2026-08-18, RESEARCH-0003 §4.2)
+
+The single ≥30% entity-phase bar was unreachable *by construction*, not by
+underperformance. AI sub-attribution measures the whole AI step at ~19–20% of
+this world's entity phase, so gating AI frequency cannot remove 30% of the
+phase even at 100% effectiveness; movement and physics are the rest, and the
+parity-preserving technique deliberately leaves them per-tick.
+`ws1EntityPhaseReduction` tracked 15–21.5% (latest 18.6%) against the 30%
+bar — i.e. it was already removing roughly **75–95% of everything it is able
+to address** while reading as a failure. ServerCore is the existence proof
+that ≥30% is available *only* by giving up vanilla parity.
+
+A bar a technique cannot clear is not a quality standard, it is a mislabelled
+one, and it was hiding the fact that WS-1 works. So the bar is now stated
+against the pool each tier can actually address:
+
+- **≥50% of the AI-step slice** for the parity tier. This is a **collapse
+  detector, not a drift detector**. Measured directly on 2026-08-18 across four
+  runs: **67.2 / 67.7 / 68.3 / 74.6%** — a ~7-point spread that is itself the
+  reason the bar sits well below the mean rather than just under it. A WS-1
+  that silently stops throttling — mixin unapplied, tier logic
+  broken, config regressed — lands near 0%, so 50% separates working from
+  broken with margin for single-run noise and for the shared CI runners
+  `bench.yml` already calls noisy. Catching 67% → 62% drift is the bench-data
+  regression gate's job; the exact figure is recorded every run as
+  `ws1_ai_slice_reduction`. **Do not read 50% as where the implementation
+  sits.**
+- **≥10% entity-phase floor** alongside it, so the primary bar cannot be met
+  by the AI slice shrinking for unrelated reasons (a cheaper base tick, a
+  different mob population). Measured 15.7–16.4% across the same runs.
+- **≥30% entity-phase** for the aggressive tier, unchanged.
+
+One measurement was corrected in the process: the AI step was recorded as
+~19–20% of the entity phase from the 2026-08-16 sub-attribution pass, and the
+2026-08-18 runs put it at **16.6–16.7%**. That moves the argument's direction
+not at all — it makes the ≥30% phase bar *less* reachable, not more.
+
+**What is not yet built:** the `ActivationPolicy` SPI and the aggressive tier
+itself (RESEARCH-0003 §4.2 — two shipped implementations, the aggressive one
+opt-in, off by default, refusing to enable while ServerCore's own activation
+range is active, R4-logged as user-chosen). Until it exists the aggressive
+tier's criterion is **inert — there is nothing to measure against it**, and no
+claim may be made about ≥30% on that basis. The parity tier's bar is live and
+gated in `WeftBenchGameTests`.
+
+This changes what CI asserts; it does **not** change `activationScheduling`'s
+default. That stays off until WS-1 ships on its own merits.
 
 ### WS-2: Async read-mostly services (the RFC-0001 P1 items)
 Pathfinding and spawn-density scanning move off-thread behind the Weft API.
@@ -189,6 +232,15 @@ ops tooling and is the adoption wedge for server admins.
   through an API nobody offers. The one-way `spark-api` *read* (WS-6.2's GC
   data, and a `/weft report` MSPT cross-check) is a separate soft dependency;
   `tps()`/`mspt()` are `@Nullable`, so a null path is required.
+- **Amended by [RFC-0009](RFC-0009-observability-exporter.md) (draft 1):** the
+  exact metric names, event-stream envelope and schema, `[observability]`
+  config block, and RFC-0003 compliance are decided there — the surface is API
+  the day it ships, and seven of the series sketched above needed a rename, a
+  narrowing or a drop because Weft does not measure what their names claim.
+  Notably: no `weft-neighbors.toml` rows for the exporter mods (RFC-0003 §3.1
+  forbids unverified modids; a **port collision is detected by binding**, not
+  by modid), and `weft_jvm_gc_*` ships as a counter pair rather than a pause
+  histogram because pause attribution is WS-6.2's territory.
 
 ### WS-8: Benchmark-as-CI
 JMH suite for engine hot paths (mailboxes, region merge/split, LPT scheduling,

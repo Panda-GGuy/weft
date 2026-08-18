@@ -31,18 +31,26 @@ import java.util.Locale;
  *   <li>{@link #ws1BehaviorParityNearPlayers} — "no behavior change within 32
  *       blocks of a player" — <b>hard gate</b>: it holds today and must never
  *       break.</li>
- *   <li>{@link #ws1EntityPhaseReduction} — ">=30% entity-phase reduction" —
- *       measured and tracked nightly, asserted as an <em>optional</em> test
- *       ({@code required = false}): same-run A/B measures 15-21.5% across
- *       runs (single-run noise is several points) with 92% of throttleable
- *       AI ticks skipped. Profiler sub-attribution (2026-08-16) explains the
- *       gap: the whole AI step ({@code serverAiStep}) is only ~19-20% of
- *       this world's entity phase — movement/physics is the rest — so no
- *       amount of AI-frequency gating clears 30% on this population. The
- *       bar waits on a different lever (WS-10 sharding compounding, or a
- *       cheaper entity base tick), not on more WS-1 widening. Until
- *       something clears it, {@code activationScheduling} keeps shipping
- *       default-off (RFC-0002 WS-1).</li>
+ *   <li>{@link #ws1EntityPhaseReduction} — the <b>parity-preserving tier's</b>
+ *       performance bar, a <b>hard gate</b> since the criterion split (it was
+ *       {@code required = false} while it carried a bar it could not clear).
+ *       <b>Criterion split signed off 2026-08-18</b>
+ *       (RFC-0002 WS-1, RESEARCH-0003 §4.2): this test used to assert ">=30%
+ *       entity-phase reduction" and could not pass by construction. Profiler
+ *       sub-attribution (2026-08-16) showed why: the whole AI step
+ *       ({@code serverAiStep}) is only ~19-20% of this world's entity phase —
+ *       movement/physics is the rest — so AI-frequency gating cannot remove
+ *       30% of the phase even at 100% effectiveness. Same-run A/B measured
+ *       15-21.5% (single-run noise is several points) with 92% of throttleable
+ *       AI ticks skipped, i.e. WS-1 was already removing most of what it can
+ *       address while reading as a failure. The bar is now stated against that
+ *       addressable pool: <b>>=50% of the AI-step slice removed</b>, with a
+ *       <b>>=10% entity-phase floor</b> so a shrinking AI slice cannot pass the
+ *       primary bar on its own. The >=30% entity-phase bar still exists and
+ *       belongs to the opt-in aggressive whole-tick-gating tier, which is not
+ *       built — nothing measures against it yet. Passing this test does not
+ *       flip {@code activationScheduling} on; it ships default-off until WS-1
+ *       lands on its own merits.</li>
  * </ul>
  *
  * <p>The entity phase is measured exactly as the P0 profiler defines it: the
@@ -68,9 +76,35 @@ public class WeftBenchGameTests {
     /** Fresh chunks the chunk-loading benchmark walks the bot through. */
     private static final int CHUNK_LOAD_COUNT = 192;
 
-    /** The WS-1 acceptance bar; override for local experiments only. */
-    private static double requiredReductionPct() {
-        return Double.parseDouble(System.getProperty("weft.bench.ws1MinReductionPct", "30"));
+    /**
+     * WS-1 parity-tier acceptance, primary bar: how much of the AI-step slice —
+     * the only pool AI-frequency gating can address — must be removed.
+     *
+     * <p>This is a <b>collapse detector, not a drift detector</b>. Measured
+     * 2026-08-18 over four runs: 67.2 / 67.7 / 68.3 / 74.6% (AI step ~4.4 ->
+     * ~1.4 ms/tick) — a ~7-point spread. A WS-1 that silently
+     * stops throttling — mixin unapplied, tier logic broken, config regressed —
+     * lands near 0%, so 50% separates working from broken with margin left for
+     * the several-point single-run noise this harness documents, on shared CI
+     * runners that bench.yml already calls noisy. Fine-grained drift (67.7% ->
+     * 62%) is the bench-data regression gate's job, not this assertion's: the
+     * exact figure is recorded every run as {@code ws1_ai_slice_reduction}.
+     * Do not read 50% as where the implementation sits. Override for local
+     * experiments only.
+     */
+    private static double requiredAiSliceReductionPct() {
+        return Double.parseDouble(
+                System.getProperty("weft.bench.ws1MinAiSliceReductionPct", "50"));
+    }
+
+    /**
+     * WS-1 parity-tier acceptance, secondary floor: whole-entity-phase reduction,
+     * so the primary bar cannot be met by the AI slice shrinking for unrelated
+     * reasons. Override for local experiments only.
+     */
+    private static double requiredPhaseFloorPct() {
+        return Double.parseDouble(
+                System.getProperty("weft.bench.ws1MinPhaseFloorPct", "10"));
     }
 
     /**
@@ -111,13 +145,13 @@ public class WeftBenchGameTests {
     }
 
     /**
-     * WS-1 acceptance, performance half (tracked nightly; see the class
-     * comment for why {@code required = false} for now): A/B entity-phase
-     * measurement over identical bot walks, vanilla AI cadence vs activation
-     * scheduling. Numbers are recorded before the bar is asserted, so the
-     * nightly trend exists either way.
+     * WS-1 acceptance, performance half — the parity-preserving tier (see the
+     * class comment for the signed-off split): A/B entity-phase measurement over
+     * identical bot walks, vanilla AI cadence vs activation scheduling. Numbers
+     * are recorded before the bars are asserted, so the nightly trend exists
+     * either way.
      */
-    @GameTest(template = "empty", batch = "ws1measure", timeoutTicks = 1200, required = false)
+    @GameTest(template = "empty", batch = "ws1measure", timeoutTicks = 1200)
     public void ws1EntityPhaseReduction(GameTestHelper helper) {
         Arena arena = Arena.setUp(helper, "WeftBenchBot");
         WeftConfig.PROFILING_ENABLED = true;
@@ -147,6 +181,7 @@ public class WeftBenchGameTests {
             ActivationHooks.Counters engaged =
                     ActivationHooks.counters().minus(countersAtActivation[0]);
             double baselineMsPerTick = baseline[0].totalMs();
+            double baselineAiMs = baseline[0].aiMs();
             double activatedMsPerTick = activated.totalMs();
             WeftConfig.PROFILE_WINDOW_TICKS = 100;
             arena.tearDown();
@@ -174,18 +209,45 @@ public class WeftBenchGameTests {
             BenchRecorder.record(helper.getLevel().getServer(),
                     "ws1_entity_phase_activation_scheduling", "ms/tick", activatedMsPerTick,
                     String.format(Locale.ROOT,
-                            "%.1f%% entity-phase reduction (acceptance bar: >=%.0f%%); "
+                            "%.1f%% entity-phase reduction (parity-tier floor: >=%.0f%%); "
                                     + "%d passive + %d hostile mobs, %d measured ticks/phase; "
                                     + "%d AI skips, %d repaths deferred (WS-2 requests avoided)",
-                            reduction, requiredReductionPct(),
+                            reduction, requiredPhaseFloorPct(),
                             BenchmarkWorld.PASSIVE_COUNT, BenchmarkWorld.HOSTILE_COUNT,
                             PHASE_TICKS, engaged.skips(), engaged.repathDeferrals()));
 
-            if (reduction < requiredReductionPct()) {
+            // A zero-cost baseline AI slice would make the primary bar vacuously
+            // passable rather than merely unmet - guard it like any other vacuous run.
+            if (baselineAiMs <= 0.0) {
+                helper.fail("WS-1 acceptance unmeasurable: baseline AI-step slice is "
+                        + baselineAiMs + " ms/tick - is serverAiStep sub-attribution wired up?");
+            }
+            double aiSliceReduction = 100.0 * (1.0 - activated.aiMs() / baselineAiMs);
+            BenchRecorder.record(helper.getLevel().getServer(),
+                    "ws1_ai_slice_reduction", "%", aiSliceReduction,
+                    String.format(Locale.ROOT,
+                            "parity-tier acceptance bar: >=%.0f%% of the AI-step slice removed "
+                                    + "(%.3f -> %.3f ms/tick). This is the pool AI-frequency "
+                                    + "gating can address; the >=30%% entity-phase bar belongs "
+                                    + "to the opt-in aggressive tier (RFC-0002 WS-1)",
+                            requiredAiSliceReductionPct(), baselineAiMs, activated.aiMs()));
+
+            // RFC-0002 WS-1, split criterion signed off 2026-08-18: the parity tier
+            // is judged against the slice it can address, with a whole-phase floor so
+            // a shrinking AI slice cannot pass the primary bar on its own.
+            if (aiSliceReduction < requiredAiSliceReductionPct()) {
                 helper.fail(String.format(Locale.ROOT,
-                        "WS-1 acceptance bar not met yet: %.1f%% entity-phase reduction < %.0f%% "
-                                + "(vanilla %.3f ms/tick, activated %.3f ms/tick)",
-                        reduction, requiredReductionPct(),
+                        "WS-1 parity-tier bar not met: %.1f%% AI-slice reduction < %.0f%% "
+                                + "(AI step %.3f -> %.3f ms/tick, %d skips)",
+                        aiSliceReduction, requiredAiSliceReductionPct(),
+                        baselineAiMs, activated.aiMs(), engaged.skips()));
+            }
+            if (reduction < requiredPhaseFloorPct()) {
+                helper.fail(String.format(Locale.ROOT,
+                        "WS-1 parity-tier floor not met: %.1f%% entity-phase reduction < %.0f%% "
+                                + "(vanilla %.3f ms/tick, activated %.3f ms/tick) - the AI slice "
+                                + "cleared its bar, so the phase is dominated by something else",
+                        reduction, requiredPhaseFloorPct(),
                         baselineMsPerTick, activatedMsPerTick));
             }
             helper.succeed();

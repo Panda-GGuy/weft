@@ -112,8 +112,10 @@ facts verified this pass keep it real:
 This also explains WS-1's measurement ceiling rather than leaving it a
 mystery: the whole AI step is only ~19–20% of the entity phase, so a ≥30%
 entity-phase bar is unreachable while movement stays per-tick. See
-RESEARCH-0003 §4.2 for the proposed split of that acceptance criterion —
-a product decision, not a documentation fix.
+RESEARCH-0003 §4.2 for the split of that acceptance criterion, **signed off
+2026-08-18 and now live in RFC-0002 WS-1**: the parity tier is measured
+against the AI slice it can actually address, and the ≥30% entity-phase bar
+moved to the opt-in aggressive tier.
 
 ## 2. Networking/worldgen concurrency — real gap, partially closed by a shim
 

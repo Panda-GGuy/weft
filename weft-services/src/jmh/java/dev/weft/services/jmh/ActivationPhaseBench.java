@@ -34,8 +34,13 @@ import java.util.concurrent.TimeUnit;
  * scheduler (sensing + goal/target selectors — what MobAiThrottleMixin
  * skips) plus {@code MOVE_TOKENS} that always run (movement, physics,
  * navigation-in-flight — what WS-1 never touches). The 80/20 split reflects
- * the passive-mob-AI-dominated profile that motivated WS-1; the acceptance
- * bar (≥30% entity-phase reduction) holds even at a 50/50 split, since
+ * the passive-mob-AI-dominated profile that motivated WS-1. Read this as an
+ * upper-bound cost model, not as acceptance evidence: it assumes throttled AI
+ * dominates a mob's tick, which in-world sub-attribution measured at only
+ * ~19-20% of the entity phase. The old flat ≥30% entity-phase bar this
+ * comment cited now belongs to WS-1's unbuilt aggressive tier; the shipped
+ * parity tier is judged on AI-slice removal instead (RFC-0002 WS-1, split
+ * signed off 2026-08-18). The model holds even at a 50/50 split, since
  * ~93% of the population throttles at 1/4-to-1/20 rate. The per-mob
  * decision cost (distance + intervalFor) is included in the throttled
  * path, so the number is net of WS-1's own overhead.

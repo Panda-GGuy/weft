@@ -420,6 +420,12 @@ into, with WS-7's endpoint as the only consumer. Modules stay independent
 
 ### 4.2 `ActivationPolicy` SPI — the honest route to the ≥30% bar
 
+**Status: the criterion split is ACCEPTED (signed off 2026-08-18) and applied
+in RFC-0002 WS-1; the SPI itself is not yet built.** The parity tier's bar is
+now ≥50% of the measured AI-step slice with a ≥10% entity-phase floor, and the
+≥30% entity-phase bar belongs to the aggressive tier — inert until something
+implements it. The proposal below stands as the design for that work.
+
 Evidence: §3.1. WS-1's bar is unreachable while movement stays per-tick; the
 technique that reaches it (whole-tick skip) is shipped by ServerCore and
 diverges from vanilla. Weft should stop treating that as off-limits and start
@@ -547,9 +553,10 @@ research to confirm.
 ## 6. Recommended actions
 
 **Status as of 2026-08-18 (second pass).** Actions 1–4 and 8 are **done** —
-see §7. Actions 5, 6 and 7 remain open: 5 needs a product sign-off, 6 is
-scoped-not-built, and 7 needs a network path to Modrinth that the verifying
-session did not have.
+see §7. **Action 5 was signed off 2026-08-18 and is done** (the criterion split;
+the SPI that action 5 proposed as its vehicle is scoped-not-built). Actions 6
+and 7 remain open: 6 is scoped-not-built, and 7 needs a network path to
+Modrinth that the verifying session did not have.
 
 1. **Correct E1/E2 in RESEARCH-0001 §1 and RFC-0002 WS-1** — narrow the "no
    NeoForge equivalent" claim to the parity-preserving variant, and move
@@ -564,9 +571,11 @@ session did not have.
 4. **Close the RFC-0003 §3 / registry drift (E7)** in whichever direction is
    truthful — either seed the missing modids or mark the table's extra rows as
    "posture decided, modid unconfirmed."
-5. **Split WS-1's acceptance criterion (§4.2)** into a parity-preserving
+5. ~~**Split WS-1's acceptance criterion (§4.2)** into a parity-preserving
    target and an opt-in aggressive tier, rather than carrying a bar the
-   technique cannot clear.
+   technique cannot clear.~~ **DONE — signed off 2026-08-18.** Parity tier:
+   ≥50% of the measured AI-step slice, ≥10% entity-phase floor. Aggressive
+   tier: ≥30% entity-phase, inert until the tier exists. See RFC-0002 WS-1.
 6. **Take the two cheap integrations** — `spark-api` as a soft dependency for
    WS-6.2's GC data plus a `/weft report` cross-check, and `ChunkyAPI`'s
    `isRunning`/progress listeners to stop pre-generation from poisoning the

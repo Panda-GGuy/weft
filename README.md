@@ -270,14 +270,22 @@ one-glance posture table in the log and `/weft status`. First entries from
   `ActivationPhaseBench`) shows **72% entity-phase reduction** (634 us ->
   177 us per tick, decision cost ~12 ns/mob) — but that is a *model* upper
   bound (it assumes throttled AI dominates a mob's tick cost). In-world
-  same-run A/B measures **15-21.5%** across runs, under the >=30% bar, with
-  92% of throttleable AI ticks skipped. Profiler **AI sub-attribution**
-  (a second timing slice around `serverAiStep`) now explains the ceiling:
-  the whole AI step — sensing, selectors, navigation, brain, controls — is
-  only **~19-20% of the benchmark world's entity phase**; movement/physics
-  is the rest, and no amount of AI-frequency gating touches it. WS-1 alone
-  therefore cannot clear 30% on that population; the bar waits on WS-10
-  sharding compounding (P2) or a cheaper entity base tick. Widened gating
+  same-run A/B measures **15-21.5%** across runs, with 92% of throttleable
+  AI ticks skipped. Profiler **AI sub-attribution** (a second timing slice
+  around `serverAiStep`) explains why that is the ceiling and not a
+  shortfall: the whole AI step — sensing, selectors, navigation, brain,
+  controls — is only **~16-20% of the benchmark world's entity phase**;
+  movement/physics is the rest, and no amount of AI-frequency gating touches
+  it. A >=30% entity-phase bar is therefore unreachable by this technique at
+  *any* effectiveness. **The acceptance criterion was split accordingly
+  (signed off 2026-08-18, RFC-0002 WS-1):** the parity-preserving tier is now
+  measured against the pool it can address — **>=50% of the AI-step slice**
+  with a **>=10% entity-phase floor**, both hard-gated — and the >=30%
+  entity-phase bar moved to an opt-in aggressive whole-tick-gating tier that
+  **is not built**, so nothing measures against it yet. Measured 2026-08-18:
+  **67.2-74.6%** of the AI slice removed across four runs (15.7-16.4% of the
+  entity phase). The 50% gate is a collapse detector sized for that spread,
+  not where the implementation sits. Widened gating
   still landed: a throttled mob now also stretches its periodic
   path-recompute window by its AI interval (never inside the 32-block
   full-rate ring; exemptions inviolate; fail-soft, same module switch) —

@@ -4,7 +4,8 @@ name: bench
 #   jmh         - engine hot paths (mailboxes, merge/split, pipeline, graph).
 #   world-bench - the reproducible benchmark world + headless GameTest load
 #                 generator: WS-1 acceptance (2k passive + 500 hostile mobs,
-#                 >=30% entity-phase cut, near-player parity) is asserted
+#                 >=50% of the AI-step slice with a >=10% entity-phase
+#                 floor, near-player parity) is asserted
 #                 inside the gametest itself; the measured numbers join the
 #                 same regression tracking as the JMH results.
 # Results are recorded on the bench-data branch; a job FAILS when any
