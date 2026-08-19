@@ -29,6 +29,22 @@ the testing playbook live on the
 | `weft-neoforge` | The actual mod: mixins, event bus adaptation, config | NeoForge 1.21.1 |
 | `weft-adapters` | Per-mod graph adapters (Create, AE2, …) | Planned (P3) |
 
+## Testing
+
+Three tiers, and the reasoning for them is in
+[TESTING-0001](docs/TESTING-0001-how-weft-gets-tested.md):
+
+```
+./gradlew :weft-neoforge:runGameTestServer -PwithNeoForge   # mechanism + combination gates
+scripts/lab/install-pack.sh <instance>                      # then a live soak, see scripts/lab
+```
+
+The gametests prove individual mechanisms and are fast. They are **not
+sufficient**: a green 23-test suite missed four crashes that two hours of
+ordinary play found, because every rig holds the world still with one flag on,
+and interactions plus moving worlds are what actually break. `scripts/lab` is
+the other half.
+
 ## Building
 
 Core (engine + api + sandbox — pure Java 21, no Minecraft):
