@@ -91,13 +91,50 @@ public final class WeftObservability {
                     + "time spent working, see weft_mspt_seconds.",
             WeftTelemetry.TICK_SECONDS);
 
+    /**
+     * <b>Corrected 2026-08-18, after it falsified a live reading.</b> This was
+     * {@code min(20, 1e9 / median)}, and on a server with 45% of its ticks over
+     * 50 ms it published a flat <b>20</b> — the operator's own distribution said
+     * 14. Two mistakes compounded: a <em>median</em> hides a large minority of
+     * overruns, and the <em>cap</em> then pinned the result at exactly the value
+     * that means "fine". A gauge that reads healthy while a third of the tick
+     * budget is missing is worse than no gauge.
+     *
+     * <p>Now the mean, uncapped. Values above 20 are real and mean the server is
+     * ticking faster than realtime — a gametest server with no inter-tick sleep
+     * does exactly that — rather than something to be clamped away.
+     */
     private static final WeftTelemetry.Gauges TPS = WeftTelemetry.gauge(
-            "weft_tps", "Ticks per second, from the median tick period. Caps at 20.");
+            "weft_tps",
+            "Ticks per second from the MEAN tick period over a 30s window, uncapped. "
+                    + "Includes overrunning ticks, which is the point: a median-based "
+                    + "figure reads 20 on a server missing 45% of its budget. Above 20 "
+                    + "means faster than realtime (no inter-tick sleep), not an error.");
+
+    /**
+     * The median-based figure, kept as its own series rather than deleted. Paired
+     * with {@code weft_tps} it distinguishes two very different servers: a mean
+     * far below the median means a minority of very slow ticks, while the two
+     * converging means uniform slowness.
+     */
+    private static final WeftTelemetry.Gauges TPS_MEDIAN = WeftTelemetry.gauge(
+            "weft_tps_median",
+            "Ticks per second from the MEDIAN tick period, uncapped. Insensitive to a "
+                    + "slow minority by design - compare against weft_tps to see whether "
+                    + "slowness is uniform or spiky.");
 
     /**
      * Vanilla's own average tick time — literally the number {@code /tps} and
-     * spark show an admin, which is what makes it the right cross-check. An
-     * average over vanilla's 100-tick ring, not a per-tick sample, so it is a
+     * spark show an admin, which is what makes it the right cross-check.
+     *
+     * <p><b>It understates the load, and the amount is not small.</b> It measures
+     * work <em>inside</em> {@code tickServer}, while the main thread also runs
+     * queued tasks in {@code waitUntilNextTick}'s drain — where a pre-generator's
+     * chunk work lives. Observed on a live server: 25 ms here against a 71 ms mean
+     * tick period. So read it with {@code weft_tick_period_seconds}, never alone;
+     * the difference between them is main-thread work this number cannot see.
+     *
+     * <p>An average over vanilla's 100-tick ring, not a per-tick sample, so it is a
      * gauge rather than a histogram: a per-tick work duration would need a second
      * injection into {@code tickServer}, and RFC-0009 8 promises this module
      * needs no mixins at all.
@@ -398,9 +435,12 @@ public final class WeftObservability {
                     }
                     long median = detector.medianNanos();
                     if (median > 0) {
-                        // Capped at 20: vanilla sleeps to hold that, so a shorter
-                        // median means the clock, not a faster world.
-                        TPS.set(Math.min(20.0, 1e9 / median));
+                        TPS_MEDIAN.set(1e9 / median);
+                    }
+                    long mean = detector.meanNanos();
+                    if (mean > 0) {
+                        // Uncapped, and from the mean: see the TPS field note.
+                        TPS.set(1e9 / mean);
                     }
                 }
             }
