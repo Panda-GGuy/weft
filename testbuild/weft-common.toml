@@ -7,45 +7,46 @@
 # actually want to differ.
 #
 # ===========================================================================
-# READ THIS FIRST: parallelRegions is OFF in this file, on purpose.
+# What this buys you, and what it costs
 # ===========================================================================
 #
-# The measurement is real and reproduced: region parallelism is 3.35-3.48x on
-# the entity section and 2.4-2.6x on full-tick MSPT, on an 8-region world with
-# 1760 mobs (see docs/TESTBUILD-0001-multithreading-preview.md for the method
-# and the negative control).
+# Region parallelism measured 3.33-3.90x on the entity section and 2.43-2.76x
+# on full-tick MSPT, across seven runs on an 8-region / 1760-mob world, with a
+# one-region negative control at 0.98-1.04x. Method and controls:
+# docs/TESTBUILD-0001-multithreading-preview.md.
 #
-# It is also not safe to run yet, and this file will not pretend otherwise.
-# The first live-server soak — five minutes, 2026-08-18 — found two crashes:
+# It is ON below. It was NOT on in the first cut of this file, because the
+# first live-server soak crashed it twice in five minutes. Both crashes are now
+# root-caused and fixed:
 #
 #   RFC-0006 hazard 21  a villager opening a door raced the level-wide
-#                       navigatingMobs set. FIXED in this build.
-#   RFC-0006 hazard 22  a worker reading a chunk whose status is changing
-#                       hard-crashes the server. STILL OPEN. Deterministic at
-#                       boot on any world with forceloaded chunks containing
-#                       entities, and reproduced by a player simply walking
-#                       away from spawn.
+#                       navigatingMobs set, and the loop also wrote to other
+#                       regions' mobs mid-tick. Fixed by deferring to the
+#                       section barrier.  (github issue #3)
+#   RFC-0006 hazard 22  worker chunk reads waited on a promotion future that
+#                       only the parked main thread can complete, so every
+#                       border-ring read failed for as long as a parallel
+#                       section ran. Deterministic, not racy. Fixed by reading
+#                       the generated-FULL view vanilla already guarantees.
+#                                                          (github issue #4)
 #
-# Hazard 22 needs a region-readiness invariant that does not exist yet, so
-# there is no config that makes parallelRegions safe on a world you care
-# about. Turn it on only in a throwaway world, and expect it to fall over.
+# This is still a PREVIEW of an open workstream. P2's exit criteria - full
+# parity suite, chaos, R7, the Create/AE2 soak, and hazards 19/20 - are not all
+# green, which is why the shipping default stays OFF and you are opting in.
+# Use a world you have backed up.
 #
-# What you CAN run today is below the line: blockEntitySharding, the intra-
-# region lever, verified stable in the same live soak (9.2M block-entity units
-# sharded, 5 regions, a moving player, 12 teleports, zero guard trips).
+# HOW MUCH IT BUYS YOU DEPENDS ON YOUR WORLD, NOT YOUR CPU. parallelRegions
+# parallelises ACROSS regions, and a region is a cluster of ticking chunks
+# (clusters within mergeDistance = 8 chunks merge into one). So:
+#   - several players spread out, or spread-out chunk-loaded farms -> many
+#     regions -> this is where the 2.4-2.8x lives.
+#   - one player, no chunk loaders -> ONE region -> parallelRegions is
+#     architecturally inert, and the ~1.0x control above is the measurement of
+#     exactly that. No amount of CPU changes it; blockEntitySharding is your
+#     only lever, and it is a tail-latency win.
 #
-# Its honest expectation is a TAIL improvement, not a throughput multiple.
-# Across two clean runs the block-entity section's p95 dropped 1.72x and 1.57x
-# — reproducible, and its negative control sat at 0.90-1.02x — while the
-# MEDIAN moved 1.34x then 1.01x, i.e. within noise. So: fewer and smaller
-# spikes, roughly the same average. That is exactly what 2x2 chunk colouring
-# is designed to do, and it is bounded by your block-entity share of the tick
-# (~10% on a Create-heavy pack) either way. Real, worth having, and not what
-# most people mean by "noticeable".
-#
-# Run `/weft status` to see your live region count and `/weft report` for the
-# profiler's breakdown of where your tick actually goes. Those two commands
-# are the useful part of this build today.
+# Run `/weft status` for your live region count and the guard counters, and
+# `/weft report` for where your tick actually goes.
 
 mergeDistance = 8
 # Threads reserved for IO / netty / GC. The worker pool is
@@ -65,16 +66,15 @@ profilingEnabled = true
 regionizedTicking = true
 partitionedTicking = true
 
-# THE LEVER, AND THE BLOCKER. Measured 2.4-2.6x full-tick on a multi-region
-# world; crashes on any world whose chunks change status while a section runs
-# (RFC-0006 hazard 22, open). Leave false unless you are deliberately testing
-# it in a world you are willing to lose.
-parallelRegions = false
+# THE LEVER. Runs those per-region buckets concurrently on engine workers,
+# barriered inside each vanilla tick section, so macro-order is unchanged.
+# Single-bucket sections (solo play: one region) take the serial path, so there
+# is no new overhead where there is nothing to parallelise.
+parallelRegions = true
 
-# Goes with parallelRegions: async results are delivered to the owning
-# region's own mailbox instead of a global inbox. Harmless with the lever off
-# (it needs partitionedTicking, which is on), and verified working in the live
-# soak - 234 routed, 234 drained, 0 inline fallback.
+# Goes with parallelRegions: async results are delivered to the owning region's
+# own mailbox, drained by that region's bucket at the head of its section.
+# Verified in the live soak - 22000 routed, 22000 drained, 0 inline fallback.
 ownerMailRouting = true
 
 # Documented behaviour change (RFC-0004 sec. 2.5): block entities in ADJACENT

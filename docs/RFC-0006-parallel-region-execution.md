@@ -75,7 +75,36 @@ own tick path invokes it constantly.
 
 | 21 | `ServerLevel.sendBlockUpdated` iterates `navigatingMobs` (ServerLevel:1078), a level-wide plain `ObjectOpenHashSet<Mob>` (ServerLevel:193) holding **every mob in the level, across every region**; `onTrackingStart`/`onTrackingEnd` add and remove from it (ServerLevel:1757/1784) on spawn, death and chunk load. The loop then calls `recomputePath()` on the mobs it selected | **Two races.** (a) Iterate-versus-mutate: any worker's block change iterates the set while another region's bucket adds or removes a mob, and fastutil answers with `NullPointerException: … "this.wrapped" is null` in `ObjectOpenHashSet$SetIterator.next`. Vanilla's guard here, `isUpdatingNavigations`, is a recursion check that assumes one thread. (b) Cross-region write: the loop mutates the `PathNavigation` of a mob in region B while region B's bucket is ticking it — forbidden outright by §2 | **Defer** (hazard 14's idiom): on a region worker the whole call enqueues to the section-end queue and runs on the server thread after the barrier, same tick, where the set has no concurrent mutator and touching any region's mobs is legal. Costs nothing observable — `sendBlockUpdated`'s client-visible half is `chunkSource.blockChanged`, and `ServerChunkCache.tick` broadcasts at ServerLevel:379, *before* the entity section at ServerLevel:420, so block changes made during entity ticking already broadcast on the following tick in unmodified vanilla. `ServerLevelNavigationDeferMixin` |
 
-| **22** | **Hazard 4's premise.** A worker calling `getChunk(x, z, FULL, load=true)` on a chunk that is loaded-but-not-yet-`FULL`, or whose status is being torn down. Hazard 4 asserted "ticket rings make this unreachable for in-region access"; that is **false**, because chunk status is not static — it changes under load-in, player movement, teleports and forceload edits, while workers are mid-section | **Hard crash.** The fail-loud guard fires: `Weft region worker requires chunk [x, z] at status minecraft:full but it is not loaded/complete`. Not a rare race: deterministic at boot on a world with forceloaded chunks containing entities (three consecutive boots, three different chunks), and reproduced during ordinary play within a minute — a player teleporting away from spawn dropped spawn chunks out of their ticket while a worker read one | **OPEN — blocks `parallelRegions` for any real world, not merely default-ON.** The guard is right; the invariant is missing. The fix is a region-readiness/border guarantee (a bucket may fan out only when its region *and its read border* are live), which is what Folia's region model provides and `RegionTopology` does not yet. Rejected as unsound: a lock (does not address the status transition), returning `null` from `getChunk(load=true)` (violates vanilla's non-null contract — moves the crash somewhere unpredictable), aborting and re-running the entity (its tick has already half-applied), and any "quiesce" gate (`ChunkMap.hasWork()` includes `distanceManager.hasTickets()`, true on every live server). Needs its own RFC |
+| **22** | **Hazard 4's premise, and the worker read path's dependency on a parked thread.** `ChunkMap.prepareEntityTickingChunk` (ChunkMap:364) is `getChunkRangeFuture(holder, radius 2, ChunkStatus.FULL)`: vanilla guarantees that before a chunk ticks entities, every chunk within radius 2 is *generated* to `ChunkStatus.FULL`. But `ChunkStatus.FULL` (generation) and `FullChunkStatus.FULL` (promotion) are different things reached by different futures, and hazards 1–4's read path asked about **promotion** — whose continuation is scheduled onto `ChunkMap.mainThreadMailbox` (ChunkMap:704) | **Hard crash, deterministic.** During a fanned-out section the main thread is parked at our barrier and cannot drain that mailbox, so a border chunk's `fullChunkFuture` stays incomplete for exactly as long as the section runs. Every read into the border ring answered null and hazard 4's guard turned that into a crash: three consecutive boots, three different chunks, every one a short-reach read at a chunk boundary (`Entity.updateFluidHeightAndDoFluidPushing` → `getFluidState` ×2, `Mob.serverAiStep` → `getBlockState`). **This is hazard 1 wearing a different hat** — a dependency on a future only the parked main thread can complete — which is why it was deterministic rather than racy | **FIXED.** Answer the question vanilla's invariant actually guarantees: when no promoted view exists, fall back to the generated-`FULL` view if it is a real `LevelChunk`. That is the same object and the same block states the main thread would hand a vanilla caller reading the same border chunk — `replaceProtoChunk` (GenerationChunkHolder:90) rewrites every status future *except* the last, so the `FULL` future holds the `LevelChunk` and not an `ImposterProtoChunk`. Scoped to `getChunk(..., load=true)` **only**: `getChunkNow` is vanilla's "only if loaded" probe, whose null is a loadedness answer, and it never crashed so it has nothing to be rescued from. Beyond radius 2 a null still fails loud, and still should — that is a read vanilla would have had to sync-load, the real bug hazard 4 was written to catch. Border reads are counted and surfaced in `/weft status` |
+
+### Hazard 22's fix, and the counter that caught the first attempt
+
+The first version of the fix put the fallback in the shared resolve path, so
+`getChunkNow` started answering with generated-but-unloaded chunks — turning a
+null that callers read as "not loaded" into a lie. It was visible immediately:
+**8,260,234 border reads in thirty seconds** on a rig whose actual border ring
+is a few hundred chunks. Scoping the fallback to the `load=true` path dropped
+that to 21,712, a 380x reduction. The counter existed because hazard 4 used to
+make this case a hard crash and the concession replacing it had to stay
+visible; it paid for itself within one run.
+
+The counter also carries the fix's own evidence. On a steady-state world it
+stays flat — through 15 teleports and 106 rounds of forceload add/remove churn
+it did not move at all, because once promotion completes the promoted view is
+there and the fallback is never reached. It runs high only during **boot**
+(~400k–670k across the first seconds on the repro world), which is exactly the
+predicted shape: 560 zombies and 24 villagers all reading borders while a
+promotion backlog sits behind a main thread that parks once per section. A
+count that keeps climbing in steady state would mean a worker reaching
+somewhere it should not, i.e. the bug hazard 4 was written to catch, and that
+now shows up as a number instead of an outage.
+
+**Verification.** The world that crashed 3-for-3 now boots clean 3-for-3
+(`increment 5 parallel`, 5 regions, 0 unmapped units, 0 domain trips, clean
+shutdown), with the hazard 21 trigger — villagers and doors — present in it.
+A 106-round soak of teleports, forceload churn and mid-run zombie/villager
+spawns holds 9,122 partitioned sections and 16.2M sharded block-entity units
+with zero guard trips. Suite green 22/22.
 
 ### How hazards 21 and 22 were found: nobody had run a live soak
 
@@ -220,15 +249,14 @@ remain: the
 full parity suite green at declared classes, chaos + R7 green, and the
 Create/AE2 soak clean under the flag.
 
-**Amended 2026-08-18 — hazard 22 downgrades the flag below opt-in-usable.**
-Until then this section's framing was "default OFF, safe to opt into"; the
-first live soak showed that is not true. `parallelRegions` crashes
-deterministically on any world whose chunk status changes while a section is
-running — boot with forceloaded chunks, or a player walking — so the honest
-posture is **experimental, throwaway worlds only**, and that is what
-`TESTBUILD-0001` tells operators. Hazard 22 joins 19 and 20 as an exit
-criterion, and it is the one that gates *opt-in* rather than merely
-default-ON.
+**Amended 2026-08-18 — hazard 22 found, then fixed; opt-in restored.** For a
+few hours this section read "experimental, throwaway worlds only": the first
+live soak crashed `parallelRegions` deterministically and no configuration made
+it safe. Root-causing it (see hazard 22 above) showed it was not the missing
+region-readiness invariant it first looked like, but hazard 1's problem in
+disguise — a worker read path waiting on a future only the parked main thread
+could complete — and that has a bounded fix. **Opt-in is usable again**, on the
+evidence in hazard 22's verification note. Default-ON still waits on 19 and 20.
 
 **And a fourth exit criterion, from the same soak: a live-server soak.** The
 list above is entirely rig-based, and rigs are what missed hazards 21 and 22.

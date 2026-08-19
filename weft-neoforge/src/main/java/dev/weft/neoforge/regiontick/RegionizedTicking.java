@@ -191,6 +191,7 @@ public final class RegionizedTicking {
         mailRouted = false;
         sharded = false;
         sectionProbe = null;
+        ParallelAccess.resetBorderReads();
         BlockEntityShards.reset();
         ownerIds.clear();
         lastEntityPartition = new long[0];
@@ -602,7 +603,13 @@ public final class RegionizedTicking {
                 : "increment 1 ticking (whole level, serial, server thread)";
         String mail = mailRouted ? "; " + OwnerMail.summary() : "";
         String shards = sharded ? "; " + BlockEntityShards.summary() : "";
-        return mode + ": " + sections + "; " + RegionTopology.summary() + mail + shards;
+        // Hazard 22's concession, kept in view: a small stable count is the
+        // border ring being read as vanilla reads it; a growing one is a worker
+        // reaching somewhere it should not.
+        long border = ParallelAccess.borderReads();
+        String borderReads = border == 0 ? "" : "; " + border + " border chunk reads";
+        return mode + ": " + sections + "; " + RegionTopology.summary()
+                + mail + shards + borderReads;
     }
 
     private static long ownerId(ServerLevel level) {
