@@ -190,6 +190,7 @@ public final class RegionizedTicking {
         // scheduler (WeftMod.postToOwner's documented drop contract).
         mailRouted = false;
         sharded = false;
+        sectionProbe = null;
         BlockEntityShards.reset();
         ownerIds.clear();
         lastEntityPartition = new long[0];
@@ -345,6 +346,42 @@ public final class RegionizedTicking {
     }
 
     /**
+     * Receives the wall time of each vanilla tick section the partitioner
+     * executes. Installed only by benchmarks (production reads section timing
+     * through the WS-7 exporter's histograms instead).
+     *
+     * <p>Exists because the exporter aggregates: a histogram cannot be sliced
+     * into the alternating phases an interleaved A/B/A/B benchmark pools, and
+     * <em>per-tick section samples pooled per phase</em> is the ruler P2's
+     * first throughput attempt lacked — it judged a change confined to one
+     * section by full-tick MSPT, and the effect was swamped (RFC-0008 §4,
+     * the retracted 1.59x).
+     *
+     * <p>Called on the server thread, after the barrier, once per section.
+     */
+    public interface SectionProbe {
+        /**
+         * @param sectionKind  {@code "ENTITY"} or {@code "BLOCK_ENTITY"}
+         * @param sectionNanos wall time the vanilla section paid, barrier included
+         * @param buckets      region buckets this section ran
+         * @param fannedOut    whether they ran concurrently
+         */
+        void onSection(String sectionKind, long sectionNanos, int buckets, boolean fannedOut);
+    }
+
+    private static volatile SectionProbe sectionProbe;
+
+    /**
+     * Install (or clear, with null) the benchmark section tap. A test MUST
+     * clear it before finishing: it is a static hook on the tick path, and a
+     * probe left installed would silently charge one batch's clock reads to
+     * every later batch in the same server.
+     */
+    public static void setSectionProbe(SectionProbe probe) {
+        sectionProbe = probe;
+    }
+
+    /**
      * Execute one section's buckets: fanned out on the engine pool when
      * parallel mode is on and there are ≥2 buckets (RFC-0006 §2 — the
      * server thread barriers here), otherwise increment-4 serial on the
@@ -367,18 +404,21 @@ public final class RegionizedTicking {
      * the WS-10 case — that is two clock reads for the whole section.
      *
      * <p>Double-gated on the observability module being active and on
-     * {@code regionTimingEnabled}. When off, the {@code long[]} is never allocated
-     * and no clock is read (R6: zero residue). What it buys is per-region tick
-     * duration, hottest-region share, and a worker-utilisation ratio that is a
-     * real work-conservation figure rather than a scrape-time sample of an idle
-     * pool (§3.3).
+     * {@code regionTimingEnabled} — or, in tests only, on a {@link SectionProbe}
+     * being installed. When all three are off, the {@code long[]} is never
+     * allocated and no clock is read (R6: zero residue). What it buys is
+     * per-region tick duration, hottest-region share, and a worker-utilisation
+     * ratio that is a real work-conservation figure rather than a scrape-time
+     * sample of an idle pool (§3.3).
      */
     private static String[] runBuckets(WeftScheduler engine,
                                        List<WeftScheduler.OwnedSection> sections,
                                        String levelId, String sectionKind) {
         String[] threads = new String[sections.size()];
-        boolean timing = !levelId.isEmpty()
+        boolean exportTiming = !levelId.isEmpty()
                 && dev.weft.neoforge.observability.WeftObservability.regionTimingActive();
+        SectionProbe probe = sectionProbe;
+        boolean timing = exportTiming || probe != null;
         long[] bucketNanos = timing ? new long[sections.size()] : null;
         long sectionStart = timing ? System.nanoTime() : 0L;
         boolean fannedOut = parallel && sections.size() >= 2;
@@ -416,9 +456,14 @@ public final class RegionizedTicking {
         }
 
         if (timing) {
-            dev.weft.neoforge.observability.WeftObservability.onSectionBuckets(
-                    levelId, sectionKind, bucketNanos,
-                    System.nanoTime() - sectionStart, fannedOut);
+            long sectionNanos = System.nanoTime() - sectionStart;
+            if (exportTiming) {
+                dev.weft.neoforge.observability.WeftObservability.onSectionBuckets(
+                        levelId, sectionKind, bucketNanos, sectionNanos, fannedOut);
+            }
+            if (probe != null) {
+                probe.onSection(sectionKind, sectionNanos, sections.size(), fannedOut);
+            }
         }
         return threads;
     }
