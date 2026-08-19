@@ -46,7 +46,7 @@ Consequences:
 | 1 | `ServerChunkCache.getChunk` — off-main calls `supplyAsync(mainThreadProcessor).join()` | **Deadlock**: main thread is parked at our barrier, the processor never runs | Worker read path: resolve via `getVisibleChunkIfPresent` → `ChunkHolder.getChunkIfPresent(FULL)`; the visible-chunk map is a volatile snapshot the parked main thread isn't mutating |
 | 2 | `ServerChunkCache` 4-slot `lastChunk` cache — mutated on every main-thread lookup | Torn (pos, status, chunk) triples if workers shared it | Worker path bypasses the cache entirely (no read, no store) |
 | 3 | `getChunkNow` off-main returns `null` | **Silent wrongness**: loaded chunks report as unloaded to workers | Same worker read path |
-| 4 | Unloaded-chunk access from a worker (vanilla would sync-load) | Would need main-thread chunk system | **Fail loud** with position forensics + counter. Ticket rings make this unreachable for in-region access; a trip is a real bug |
+| 4 | Unloaded-chunk access from a worker (vanilla would sync-load) | Would need main-thread chunk system | **Fail loud** with position forensics + counter. ~~Ticket rings make this unreachable for in-region access; a trip is a real bug~~ — **the premise is false; see hazard 22.** The guard is correct and the strategy stands; what was wrong is the claim that it is unreachable |
 | 5 | `Level.random` = `LegacyRandomSource` — `ThreadingDetector` throws (lines 34/45) | Hard crash on concurrent draw | Swap server levels to `ThreadSafeLegacyRandomSource` (same LCG, atomic seed — identical sequence single-threaded, worldgen-proven). Entity-path draws are 5 cosmetic sites (sound pitch ×4, fall-particle chance) → order-canonicalized under E1, digest-invisible |
 | 6 | `EntityTickList.active` — plain `Int2ObjectLinkedOpenHashMap` | Concurrent add/remove (spawn/death) corrupts | Synchronize add/remove/contains (iteration stays main-thread) |
 | 7 | `EntitySectionStorage.sections` + `sectionIds` (`Long2ObjectOpenHashMap` + `LongAVLTreeSet`) | Section-create on cross-section move races every entity query's read | Synchronize mutators **and** readers (coarse, correct; uncontended lock ≈ ns — shard later if the bench says so) |
@@ -70,6 +70,33 @@ by its own region, yet `getBlockEntity` is a **mutating** call and vanilla's
 own tick path invokes it constantly.
 
 | 18 | `Level.getBlockEntity` — **returns `null` outright when called off the server thread** (`!isClientSide && Thread.currentThread() != this.thread ? null : …`) | **Silent wrongness**: every neighbour lookup from a worker sees an empty world. Vanilla hoppers hit this every tick via NeoForge's `VanillaInventoryCodeHooks`, which turns the null into `new InvWrapper(null)` and throws on `getSlots()` | Region/shard workers take the real lookup (`LevelWorkerBlockEntityMixin`); non-worker off-thread callers keep vanilla's null |
+
+| 19..20 | *(candidates — see §3.1)* | | |
+
+| 21 | `ServerLevel.sendBlockUpdated` iterates `navigatingMobs` (ServerLevel:1078), a level-wide plain `ObjectOpenHashSet<Mob>` (ServerLevel:193) holding **every mob in the level, across every region**; `onTrackingStart`/`onTrackingEnd` add and remove from it (ServerLevel:1757/1784) on spawn, death and chunk load. The loop then calls `recomputePath()` on the mobs it selected | **Two races.** (a) Iterate-versus-mutate: any worker's block change iterates the set while another region's bucket adds or removes a mob, and fastutil answers with `NullPointerException: … "this.wrapped" is null` in `ObjectOpenHashSet$SetIterator.next`. Vanilla's guard here, `isUpdatingNavigations`, is a recursion check that assumes one thread. (b) Cross-region write: the loop mutates the `PathNavigation` of a mob in region B while region B's bucket is ticking it — forbidden outright by §2 | **Defer** (hazard 14's idiom): on a region worker the whole call enqueues to the section-end queue and runs on the server thread after the barrier, same tick, where the set has no concurrent mutator and touching any region's mobs is legal. Costs nothing observable — `sendBlockUpdated`'s client-visible half is `chunkSource.blockChanged`, and `ServerChunkCache.tick` broadcasts at ServerLevel:379, *before* the entity section at ServerLevel:420, so block changes made during entity ticking already broadcast on the following tick in unmodified vanilla. `ServerLevelNavigationDeferMixin` |
+
+| **22** | **Hazard 4's premise.** A worker calling `getChunk(x, z, FULL, load=true)` on a chunk that is loaded-but-not-yet-`FULL`, or whose status is being torn down. Hazard 4 asserted "ticket rings make this unreachable for in-region access"; that is **false**, because chunk status is not static — it changes under load-in, player movement, teleports and forceload edits, while workers are mid-section | **Hard crash.** The fail-loud guard fires: `Weft region worker requires chunk [x, z] at status minecraft:full but it is not loaded/complete`. Not a rare race: deterministic at boot on a world with forceloaded chunks containing entities (three consecutive boots, three different chunks), and reproduced during ordinary play within a minute — a player teleporting away from spawn dropped spawn chunks out of their ticket while a worker read one | **OPEN — blocks `parallelRegions` for any real world, not merely default-ON.** The guard is right; the invariant is missing. The fix is a region-readiness/border guarantee (a bucket may fan out only when its region *and its read border* are live), which is what Folia's region model provides and `RegionTopology` does not yet. Rejected as unsound: a lock (does not address the status transition), returning `null` from `getChunk(load=true)` (violates vanilla's non-null contract — moves the crash somewhere unpredictable), aborting and re-running the entity (its tick has already half-applied), and any "quiesce" gate (`ChunkMap.hasWork()` includes `distanceManager.hasTickets()`, true on every live server). Needs its own RFC |
+
+### How hazards 21 and 22 were found: nobody had run a live soak
+
+Both came out of the **first live-server soak with `parallelRegions` on** —
+about five minutes of it, on 2026-08-18. Neither is exotic. Hazard 21 is a
+villager opening a door; hazard 22 is a player walking away from spawn.
+
+The 22-test gametest suite was green, twice back to back, through both of
+them. That is the finding behind the finding. The rigs are synthetic in
+precisely the ways that hid these: they spawn zombies and passive mobs, so no
+`Brain`-based AI ever opened a door (hazard 21); and they forceload a fixed
+grid up front and never move a player, so chunk status never changes under a
+running section (hazard 22). Every rig was built to prove a specific mechanism
+and each one succeeded — while sharing an assumption none of them stated, that
+the world holds still.
+
+This is hazard 18's shape for the third time (§3's note, then §3.1's), and it
+should stop being a surprise: **a structure cleared by reasoning rather than by
+a rig that exercises it is where the next hazard lives** — and so is a rig
+whose world never changes shape. The live soak belongs in the exit criteria
+alongside the parity suite, not after it.
 
 ### How hazard 18 was found, and why it hid for two increments
 
@@ -192,3 +219,20 @@ does not flip default-ON with either still open. Exit criteria to default-ON
 remain: the
 full parity suite green at declared classes, chaos + R7 green, and the
 Create/AE2 soak clean under the flag.
+
+**Amended 2026-08-18 — hazard 22 downgrades the flag below opt-in-usable.**
+Until then this section's framing was "default OFF, safe to opt into"; the
+first live soak showed that is not true. `parallelRegions` crashes
+deterministically on any world whose chunk status changes while a section is
+running — boot with forceloaded chunks, or a player walking — so the honest
+posture is **experimental, throwaway worlds only**, and that is what
+`TESTBUILD-0001` tells operators. Hazard 22 joins 19 and 20 as an exit
+criterion, and it is the one that gates *opt-in* rather than merely
+default-ON.
+
+**And a fourth exit criterion, from the same soak: a live-server soak.** The
+list above is entirely rig-based, and rigs are what missed hazards 21 and 22.
+A soak must run with a player joining, moving, teleporting and leaving, on a
+world with forceloaded chunks that contain entities, with `Brain`-based mobs
+(villagers) present — the three properties every existing rig lacks. Cheap to
+state, and it would have caught both findings in five minutes.
