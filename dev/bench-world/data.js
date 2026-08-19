@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1787034788329,
+  "lastUpdate": 1787112581612,
   "repoUrl": "https://github.com/Panda-GGuy/weft",
   "entries": {
     "Weft world bench": [
@@ -238,6 +238,112 @@ window.BENCHMARK_DATA = {
             "value": 32.7216,
             "unit": "ms/tick",
             "extra": "2.1% full-tick MSPT reduction with P1 services at shipping defaults (spawn-density AUTHORITATIVE incl. verify ticks, asyncPathfinding=true); p95 34.933 ms; 47/300 ticks served async"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Panda-GGuy",
+            "username": "Panda-GGuy",
+            "email": "218838703+Panda-GGuy@users.noreply.github.com"
+          },
+          "committer": {
+            "name": "Panda-GGuy",
+            "username": "Panda-GGuy",
+            "email": "218838703+Panda-GGuy@users.noreply.github.com"
+          },
+          "id": "94e5ed9dcd4b6c1f3618799d1abf50a183e2265f",
+          "message": "docs: remap cited commit SHAs after the history rewrite\n\nThe identity rewrite changed every commit SHA, so the three SHAs cited in\nthe docs pointed at commits that no longer exist. Remapped via\nfilter-repo's commit-map:\n\n  8973061 -> cf9bb78  (RFC-0007:42,  merge of PR #1)\n  c2fd0df -> edfff01  (RFC-0007:123, pregen churn fix)\n  1f217cd -> cd39aed  (RESEARCH-0003:387, Moonrise neighbor)\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>",
+          "timestamp": "2026-08-18T06:07:25Z",
+          "url": "https://github.com/Panda-GGuy/weft/commit/94e5ed9dcd4b6c1f3618799d1abf50a183e2265f"
+        },
+        "date": 1787112581022,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "ws1_entity_phase_vanilla_ai",
+            "value": 32.6006,
+            "unit": "ms/tick",
+            "extra": "activation scheduling OFF (baseline)"
+          },
+          {
+            "name": "ws1_entity_phase_ai_slice_vanilla",
+            "value": 4.7957,
+            "unit": "ms/tick",
+            "extra": "AI step (serverAiStep) = 14.7% of the vanilla entity phase; the pool WS-1 gating can address"
+          },
+          {
+            "name": "ws1_entity_phase_ai_slice_activated",
+            "value": 1.0714,
+            "unit": "ms/tick",
+            "extra": "AI step remaining with activation scheduling ON (4.1% of its entity phase)"
+          },
+          {
+            "name": "ws1_entity_phase_activation_scheduling",
+            "value": 25.8501,
+            "unit": "ms/tick",
+            "extra": "20.7% entity-phase reduction (acceptance bar: >=30%); 2000 passive + 500 hostile mobs, 300 measured ticks/phase; 654170 AI skips, 0 repaths deferred (WS-2 requests avoided)"
+          },
+          {
+            "name": "ws2_entity_phase_sync_pathfinding",
+            "value": 31.8708,
+            "unit": "ms/tick",
+            "extra": "async pathfinding OFF (baseline)"
+          },
+          {
+            "name": "ws2_entity_phase_async_pathfinding",
+            "value": 31.3304,
+            "unit": "ms/tick",
+            "extra": "1.7% entity-phase reduction; 3948 requests routed off-thread; 2000 passive + 500 hostile mobs, 300 measured ticks/phase"
+          },
+          {
+            "name": "ws2_stress_entity_phase_sync_pathfinding",
+            "value": 9.0617,
+            "unit": "ms/tick",
+            "extra": "300-zombie maze horde, async pathfinding OFF (baseline)"
+          },
+          {
+            "name": "ws2_stress_entity_phase_async_pathfinding",
+            "value": 5.9696,
+            "unit": "ms/tick",
+            "extra": "34.1% entity-phase reduction on the WS-2 acceptance world (300 zombies, sealed-keep maze, every repath runs to the A* node budget); 4972 requests routed off-thread, 300 measured ticks/phase"
+          },
+          {
+            "name": "spawn_density_live_spawns",
+            "value": 70,
+            "unit": "mobs",
+            "extra": "monsters spawned through the authoritative SpawnState in 150 ticks (doMobSpawning on, midnight); 132 ticks served async"
+          },
+          {
+            "name": "p2_be_sharding_mspt_serial",
+            "value": 0.9795,
+            "unit": "ms/tick",
+            "extra": "full-tick MSPT, ONE region, partitioned ticking with blockEntitySharding OFF; 1600 ticking block entities across 400 chunks; p95 2.024 ms; 300 measured ticks"
+          },
+          {
+            "name": "p2_be_sharding_mspt_sharded",
+            "value": 1.3417,
+            "unit": "ms/tick",
+            "extra": "same run, blockEntitySharding ON (4 colour passes): 0.73x speedup, -37.0% full-tick MSPT reduction; p95 2.165 ms; 1200 shard passes over 165600 units, max 36 concurrent chunks"
+          },
+          {
+            "name": "loadgen_fresh_chunk_load",
+            "value": 6.7002,
+            "unit": "ms/chunk",
+            "extra": "bot walked 192 fresh chunks to FULL status, flat world"
+          },
+          {
+            "name": "p1_end_to_end_mspt_vanilla",
+            "value": 30.1244,
+            "unit": "ms/tick",
+            "extra": "full-tick MSPT, all P1 services off; p95 34.401 ms; 2500 countable passive mobs, 300 measured ticks"
+          },
+          {
+            "name": "p1_end_to_end_mspt_p1_services",
+            "value": 29.8466,
+            "unit": "ms/tick",
+            "extra": "0.9% full-tick MSPT reduction with P1 services at shipping defaults (spawn-density AUTHORITATIVE incl. verify ticks, asyncPathfinding=true); p95 33.604 ms; 7/300 ticks served async"
           }
         ]
       }
