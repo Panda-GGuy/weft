@@ -118,6 +118,56 @@ interaction**, and the shipped configuration is itself a claim that needs a gate
 `p2combined` is that gate, and any future flag pairing the product ships
 together needs one too.
 
+| **24** | **Chunk residency is not guaranteed, only chunk promotion was.** `ChunkMap.prepareEntityTickingChunk` promises radius-2 at `ChunkStatus.FULL` *at the moment of promotion*; nothing keeps those neighbours resident afterwards. A ticket released by a teleport, or a pre-generator's sweep moving on, evicts them while the owning chunk keeps ticking | **Hard crash.** A ticking unit's short-reach read lands in an absent chunk, hazard 22's border fallback finds no generated view either, and the hazard 4 guard fires. Found by a player pressing teleport: a `minecraft:vault` at world x=2960 — the **westernmost block of chunk [185,188]** — ran `setChanged` → `updateNeighbourForOutputSignal` → `getBlockState` one block west into chunk [184,188], which had just been evicted. Vanilla survives this because `getChunk(load=true)` simply loads it again; a worker may not (hazard 1) | **FIXED** by the readiness gate hazard 22 deferred: a unit reaches a worker only when its **radius-1 read neighbourhood is presently live**, probed with `getChunkNow` (vanilla's own method on the server thread — a visible-map lookup, no load, no promotion) and cached per chunk per section, so the cost is nine lookups per *chunk* rather than per unit. Everything else goes to the existing serial tail, where a lazy load is legal. Radius 1 because that is what the failure reaches; beyond it the guard still fails loud, which is how the next gap announces itself |
+
+### Hazard 24 retires a hedge, and the counter that caught a second one
+
+Hazard 22's write-up named this fix and then declined it:
+
+> The fix is a region-readiness/border guarantee (a bucket may fan out only when
+> its region *and its read border* are live) … Rejected as unsound: … Needs its
+> own RFC.
+
+That was defensible when every observed failure was a chunk mid-promotion, which
+the cheaper border fallback covers. It stopped being defensible the moment a
+chunk turned out to be *absent* rather than *unpromoted*. The invariant is now
+implemented, scoped to radius 1 rather than the full border guarantee — narrower
+than the original proposal, and matched to the reach the crashes actually
+demonstrate.
+
+**And the gate's own first version broke a different signal.** Deferred units
+were routed to the serial tail, and the tail's accounting billed everything in it
+to `unmappedUnits` — an invariant that is supposed to stay 0, because a ticking
+chunk with no topology region is a bug. An eviction soak promptly reported
+**14,647 "unmapped" units**, which would have made the partition gate's
+`unmapped != 0` check meaningless on any world with chunk churn. Both populations
+are now counted at classification instead of by tail size: `unmappedUnits` stays
+0, and `unreadyUnits` carries the deferrals, where non-zero is expected and
+informative rather than alarming.
+
+**Verification.** 40 rounds of deliberate eviction churn — forceload a 6×6 chunk
+block, place hopper/chest/vault stacks on the westernmost block of its second
+chunk column, then unload the first column underneath them while sections run —
+across 8 regions with the fan-out engaged: **33,754 units deferred, 0 guard
+trips, 0 exceptions, 0 unmapped units**, clean shutdown. Suite 23/23 twice back
+to back, and the region-parallelism benchmark is unmoved (3.62x–3.87x section,
+2.70x–2.76x MSPT), because on a world whose chunks are not churning the readiness
+cache hits immediately.
+
+### A WS-7 metric that measured region ids
+
+Not a hazard, but found in the same session and worth recording because of *how*.
+`weft_block_entities_ticking` was built by summing
+`RegionizedTicking.lastBlockEntityPartition()` — an array of **region ids** — and
+publishing the total as a block-entity count. On a three-region world it read
+`6`, i.e. ids 1+2+3, while the level ticked thousands. The loop variable was
+named `units`, which is how a type-correct `long[]` carried the wrong meaning
+past review. The partitioner now reports its real captured unit count.
+
+The general lesson matches hazard 23's: it was noticed only because someone
+looked at the number on a real world and found it absurd. Both single-flag
+benchmarks and 23 gametests never read it.
+
 ### Hazard 22's fix, and the counter that caught the first attempt
 
 The first version of the fix put the fallback in the shared resolve path, so

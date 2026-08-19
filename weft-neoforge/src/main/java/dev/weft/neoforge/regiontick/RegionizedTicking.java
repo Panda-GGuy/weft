@@ -83,6 +83,18 @@ public final class RegionizedTicking {
     /** Region ids of the most recent partitioned sections (gametest probes). */
     private static volatile long[] lastEntityPartition = new long[0];
     private static volatile long[] lastBlockEntityPartition = new long[0];
+    /**
+     * Ticking block entities the most recent block-entity section captured.
+     *
+     * <p>Exists because the WS-7 exporter had no honest source for this and used
+     * a dishonest one: it summed {@link #lastBlockEntityPartition()}, which holds
+     * <em>region ids</em>, and published the total as a block-entity count. On a
+     * three-region world that reported "6" — ids 1+2+3 — while the level was
+     * ticking thousands. The loop variable was even named {@code units}, which is
+     * how a type-correct {@code long[]} carried the wrong meaning past review.
+     */
+    private static volatile int lastBlockEntityUnits;
+
     /** Thread names per bucket of the most recent entity section (E1 probe). */
     private static volatile String[] lastEntityPartitionThreads = new String[0];
     /** Same, for the block-entity section — the only probe a BE-only rig has. */
@@ -103,6 +115,76 @@ public final class RegionizedTicking {
     private static java.util.HashMap<Long, Region> beBucketRegions;
     private static List<Runnable> beTail;
     private static ServerLevel beLevel;
+    /** Truly-unmapped units captured this section (see the entity-section note). */
+    private static int beUnmapped;
+
+    /**
+     * Per-section cache for {@link #readNeighbourhoodLive}. Server-thread only,
+     * same discipline as the block-entity capture slots above: sections run on
+     * the server thread and levels tick sequentially, so one slot is enough.
+     */
+    private static java.util.HashMap<Long, Boolean> readyCache;
+
+    /** Units sent to the serial tail because their read neighbourhood was not live. */
+    private static final LongAdder unreadyUnits = new LongAdder();
+
+    /**
+     * RFC-0006 <b>hazard 24</b>: may a worker be handed a unit in this chunk?
+     *
+     * <p>Answers "is this chunk's radius-1 read neighbourhood <em>presently</em>
+     * live", and it has to be asked because vanilla's own guarantee is weaker
+     * than it looks. {@code ChunkMap.prepareEntityTickingChunk} promises radius-2
+     * at {@code ChunkStatus.FULL} <em>at the moment of promotion</em>; it does not
+     * promise the neighbours stay resident. When one is evicted — a teleport
+     * releasing a ticket, a pre-generator's sweep moving on — vanilla carries on
+     * regardless, because {@code getChunk(load=true)} simply loads it again. A
+     * region worker has no such option: hazard 1 forbids it from driving the
+     * chunk system, so the same lazy load is a hard failure.
+     *
+     * <p>That is what crashed a live world on a teleport. A vault sitting on the
+     * westernmost block of its chunk called {@code setChanged} →
+     * {@code updateNeighbourForOutputSignal}, read one block west into the
+     * adjacent chunk, and that chunk was gone. Hazard 22's border fallback could
+     * not help: there was no generated view either.
+     *
+     * <p>Radius 1, not 2, because that is what the failure actually reaches — a
+     * block entity's neighbour-signal path is one block. Entities can reach
+     * further, and the entity section uses this too; that is deliberately
+     * conservative rather than complete, and the guard still fails loud for
+     * anything beyond it, which is how the next gap will announce itself rather
+     * than corrupt something quietly.
+     *
+     * <p>Probed with {@code getChunkNow}, which on the server thread is vanilla's
+     * own method — a visible-map lookup, no load triggered, no promotion
+     * required. Cached per chunk per section, so the cost is nine lookups per
+     * <em>chunk</em> rather than per unit: a few hundred microseconds on a
+     * chunk-dense world, against a crash.
+     */
+    private static boolean readNeighbourhoodLive(ServerLevel level, int cx, int cz) {
+        java.util.HashMap<Long, Boolean> cache = readyCache;
+        long key = ChunkPos.asLong(cx, cz);
+        if (cache != null) {
+            Boolean hit = cache.get(key);
+            if (hit != null) {
+                return hit;
+            }
+        }
+        boolean live = true;
+        var source = level.getChunkSource();
+        outer:
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                if (source.getChunkNow(cx + dx, cz + dz) == null) {
+                    live = false;
+                    break outer;
+                }
+            }
+        }
+        if (cache != null) {
+            cache.put(key, live);
+        }
+        return live;
+    }
 
     /** RFC-0003 R2 applied-check (belt-and-braces: these mixins are fail-loud). */
     public static boolean hooksApplied() {
@@ -190,7 +272,10 @@ public final class RegionizedTicking {
         // scheduler (WeftMod.postToOwner's documented drop contract).
         mailRouted = false;
         sharded = false;
+        lastBlockEntityUnits = 0;
         sectionProbe = null;
+        readyCache = null;
+        unreadyUnits.reset();
         ParallelAccess.resetBorderReads();
         BlockEntityShards.reset();
         ownerIds.clear();
@@ -228,10 +313,27 @@ public final class RegionizedTicking {
         TreeMap<Long, List<Entity>> buckets = new TreeMap<>();
         java.util.HashMap<Long, Region> bucketRegions = new java.util.HashMap<>();
         List<Entity> tail = new ArrayList<>();
+        // Hazard 24: only worth probing when work can actually reach a worker.
+        // Serial buckets already run on the server thread, where a lazy load is
+        // legal, so the gate would cost lookups to change nothing.
+        boolean gateReads = parallel;
+        readyCache = gateReads ? new java.util.HashMap<>() : null;
+        // Counted at classification, NOT as tail.size(): the tail now holds two
+        // very different populations and conflating them cost a working signal.
+        // "unmapped units" is an invariant that must stay 0 (a ticking chunk with
+        // no topology region is a bug); hazard-24 deferrals are expected to be
+        // non-zero whenever chunks churn. Billing both to unmappedUnits reported
+        // 14,647 "unmapped" units in an eviction soak and would have made the
+        // partition gate's `unmapped != 0` check meaningless in production.
+        int[] unmapped = new int[1];
         engine.runOwnedSerial(ownerId(level), () -> original.accept(list, entity -> {
             ChunkPos chunk = entity.chunkPosition();
             Region region = topology.regionAt(chunk.x, chunk.z);
             if (region == null) {
+                unmapped[0]++;
+                tail.add(entity);
+            } else if (gateReads && !readNeighbourhoodLive(level, chunk.x, chunk.z)) {
+                unreadyUnits.increment();
                 tail.add(entity);
             } else {
                 buckets.computeIfAbsent(region.id(), k -> new ArrayList<>()).add(entity);
@@ -261,8 +363,11 @@ public final class RegionizedTicking {
         }
         String[] threads = runBuckets(engine, sections,
                 level.dimension().location().toString(), "ENTITY");
+        readyCache = null;
+        if (unmapped[0] > 0) {
+            unmappedUnits.add(unmapped[0]);
+        }
         if (!tail.isEmpty()) {
-            unmappedUnits.add(tail.size());
             engine.runOwnedSerial(ownerId(level), () -> {
                 for (Entity entity : tail) {
                     ticker.accept(entity);
@@ -301,6 +406,9 @@ public final class RegionizedTicking {
         beBucketRegions = bucketRegions;
         beTail = tail;
         beLevel = level;
+        // Hazard 24, same reasoning as the entity section.
+        readyCache = parallel ? new java.util.HashMap<>() : null;
+        beUnmapped = 0;
         try {
             engine.runOwnedSerial(ownerId(level), vanillaSection);
         } finally {
@@ -308,7 +416,9 @@ public final class RegionizedTicking {
             beBucketRegions = null;
             beTail = null;
             beLevel = null;
+            readyCache = null;
         }
+        int unmappedAtCapture = beUnmapped;
 
         // Increment 6: bucket-head owner-mail drain, same contract as the
         // entity section (RFC-0007 §3.2).
@@ -360,14 +470,21 @@ public final class RegionizedTicking {
         }
         String[] beThreads = runBuckets(engine, sections,
                 level.dimension().location().toString(), "BLOCK_ENTITY");
+        if (unmappedAtCapture > 0) {
+            unmappedUnits.add(unmappedAtCapture);
+        }
         if (!tail.isEmpty()) {
-            unmappedUnits.add(tail.size());
             engine.runOwnedSerial(ownerId(level), () -> tail.forEach(Runnable::run));
         }
         drainSectionEndTasks();
         partitionedSections.increment();
         lastBlockEntityPartition = partition;
         lastBlockEntityPartitionThreads = beThreads;
+        int units = tail.size();
+        for (List<BeTickUnit> bucket : buckets.values()) {
+            units += bucket.size();
+        }
+        lastBlockEntityUnits = units;
     }
 
     /**
@@ -524,6 +641,13 @@ public final class RegionizedTicking {
         BlockPos pos = ticker.getPos();
         Region region = RegionTopology.managerFor(level).regionAtBlock(pos.getX(), pos.getZ());
         if (region == null) {
+            beUnmapped++;
+            beTail.add(unit);
+        } else if (readyCache != null
+                && !readNeighbourhoodLive(level, pos.getX() >> 4, pos.getZ() >> 4)) {
+            // Hazard 24: this is the exact shape that crashed - a block entity
+            // whose one-block neighbour read crosses into an evicted chunk.
+            unreadyUnits.increment();
             beTail.add(unit);
         } else {
             // Type lookup goes through the live block entity: a removed
@@ -557,6 +681,17 @@ public final class RegionizedTicking {
     /** Units whose chunk had no topology region (should stay 0). */
     public static long unmappedUnits() {
         return unmappedUnits.sum();
+    }
+
+    /**
+     * Units the hazard-24 gate sent to the serial tail. Unlike unmapped units
+     * this is expected to be non-zero on a world with chunk churn — a
+     * pre-generator or a teleporting player evicts neighbours constantly — and
+     * it is the counter that says how much work the gate is taking off the
+     * workers.
+     */
+    public static long unreadyUnits() {
+        return unreadyUnits.sum();
     }
 
     /** Region ids of the most recent partitioned entity section (probe). */
@@ -602,6 +737,11 @@ public final class RegionizedTicking {
         return BlockEntityShards.shardPasses();
     }
 
+    /** Ticking block entities the most recent block-entity section captured. */
+    public static int lastBlockEntityUnits() {
+        return lastBlockEntityUnits;
+    }
+
     /** Thread names of the most recent sharded section's tasks (fan-out probe). */
     public static String[] lastShardThreads() {
         return BlockEntityShards.lastShardThreads();
@@ -632,8 +772,11 @@ public final class RegionizedTicking {
         // reaching somewhere it should not.
         long border = ParallelAccess.borderReads();
         String borderReads = border == 0 ? "" : "; " + border + " border chunk reads";
+        long unready = unreadyUnits.sum();
+        String unreadyStr = unready == 0 ? "" : "; " + unready
+                + " units deferred (read neighbourhood not live)";
         return mode + ": " + sections + "; " + RegionTopology.summary()
-                + mail + shards + borderReads;
+                + mail + shards + borderReads + unreadyStr;
     }
 
     private static long ownerId(ServerLevel level) {

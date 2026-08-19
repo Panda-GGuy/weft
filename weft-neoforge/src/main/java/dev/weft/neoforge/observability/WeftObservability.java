@@ -549,10 +549,11 @@ public final class WeftObservability {
 
         long[] entityPartition = RegionizedTicking.lastEntityPartition();
         long[] bePartition = RegionizedTicking.lastBlockEntityPartition();
-        int tickingBlockEntities = 0;
-        for (long units : bePartition) {
-            tickingBlockEntities += (int) units;
-        }
+        // NOT a sum over bePartition: that array holds region IDS, and summing
+        // them published "6" on a three-region world (1+2+3) as a block-entity
+        // count while the level ticked thousands. The partitioner now reports the
+        // real captured unit count.
+        int tickingBlockEntities = RegionizedTicking.lastBlockEntityUnits();
 
         return new TelemetrySnapshot(tick, List.copyOf(levels), moduleStates(), phases,
                 merges, splits,
