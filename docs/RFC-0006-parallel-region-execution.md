@@ -168,6 +168,29 @@ The general lesson matches hazard 23's: it was noticed only because someone
 looked at the number on a real world and found it absurd. Both single-flag
 benchmarks and 23 gametests never read it.
 
+| **25** | **`Brain` AI reads remembered POSITIONS, at arbitrary range.** A `Brain` holds `HOME`, `JOB_SITE`, `MEETING_POINT`, `LIKED_NOTEBLOCK` and friends, and behaviours read the world at those positions directly rather than near the mob. `SleepInBed.checkExtraStartConditions` (SleepInBed:45) does a `getBlockState` at the villager's remembered bed — wherever it last slept | **Hard crash**, and one that hazard 24's fix cannot reach: that gate proves a *radius-1 neighbourhood* is live, the right bound for a block entity's neighbour-signal path and **no bound at all on a memory lookup**. The remembered chunk had been released by churn. Distinct class, not a tuning failure — *spatial gates cannot bound memory reads* | **FIXED** categorically rather than spatially: `MemoryReachEntities` lists the vanilla `Brain` users holding position memories, and the entity section routes them to the serial tail (server thread, where a lazy load is legal). Mirrors `WideReachBlockEntities`. Type-based rather than inspecting live memory sets, because those change at runtime — a mob safe to bucket on one tick would be unsafe the next — and the check would sit on the hot path. **Cost stated plainly:** listed types tick serially, so a village-heavy world loses the parallel win on villagers (2.7–4.7% of attributed cost on the motivating profile), visible in `unreadyUnits` rather than hidden |
+
+### Hazard 25, and the first one the lab found by itself
+
+Every hazard before this was found by a person playing. **This one was found by
+the soak**, fifteen minutes into the first run that combined real mods, Brain
+mobs and chunk churn in one world — which is the argument for
+`TESTING-0001`'s lab profile, made by the lab rather than about it.
+
+It also closes a loop opened deliberately. Hazard 24's note said the readiness
+gate was scoped to radius 1 because that is what the observed failures reached,
+and that **"beyond it the guard still fails loud, which is how the next gap will
+announce itself rather than corrupt something quietly."** The next gap announced
+itself the same evening, in exactly that way: fail-loud, with the offending call
+path in the stack. Scoping a fix to the evidence and leaving the guard armed
+beyond it worked as intended.
+
+**Verification.** The soak that crashed now runs to completion clean — 150
+cycles, 38,178 partitioned sections, 10 regions, 0 unmapped units, 0 domain
+trips, 0 exceptions, 52,692 units deferred. The `p2memoryreach` gate asserts the
+mechanism with two regions actually fanning out, and **fails without the fix**
+(`Only 0 units deferred, expected at least 480`). Suite 24/24.
+
 ### Hazard 22's fix, and the counter that caught the first attempt
 
 The first version of the fix put the fallback in the shared resolve path, so

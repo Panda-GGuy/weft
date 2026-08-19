@@ -332,6 +332,11 @@ public final class RegionizedTicking {
             if (region == null) {
                 unmapped[0]++;
                 tail.add(entity);
+            } else if (gateReads && MemoryReachEntities.isMemoryReach(entity)) {
+                // Hazard 25: Brain AI reads REMEMBERED positions (bed, job site,
+                // hive) at arbitrary range, so no neighbourhood radius bounds it.
+                unreadyUnits.increment();
+                tail.add(entity);
             } else if (gateReads && !readNeighbourhoodLive(level, chunk.x, chunk.z)) {
                 unreadyUnits.increment();
                 tail.add(entity);
