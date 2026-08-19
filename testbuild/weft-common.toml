@@ -83,6 +83,11 @@ ownerMailRouting = true
 # conserved and the result is reproducible; vanilla's exact ordering is not
 # preserved. If you run tick-perfect contraptions, set this to false and keep
 # the rest.
+# NOTE: this now stands itself down automatically on any level that is fanning
+# out across 2+ regions (RFC-0006 hazard 23 - the two together deadlocked, and
+# sharding was only ever the answer for the single-region case). So on a
+# multi-region world this flag is inert by design, and on a solo one-region
+# world it is your only lever. Leaving it on is correct in both cases.
 blockEntitySharding = true
 blockEntityShardMinUnits = 64
 

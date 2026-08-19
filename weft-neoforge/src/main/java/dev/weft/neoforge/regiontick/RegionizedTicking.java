@@ -313,7 +313,31 @@ public final class RegionizedTicking {
         // Increment 6: bucket-head owner-mail drain, same contract as the
         // entity section (RFC-0007 §3.2).
         boolean drainMail = mailRouted;
-        boolean shardThisSection = sharded;
+        // RFC-0006 hazard 23: sharding and region fan-out must not both engage
+        // in the same section. runBuckets decides fan-out from this same bucket
+        // count, so predict it here and stand sharding down when it is true.
+        //
+        // Without this, a region bucket runs ON A POOL WORKER and then calls
+        // BlockEntityShards.runColoured, which submits its colour-pass tasks to
+        // THE SAME pool and blocks on Future.get(). A nested blocking join
+        // inside a fixed-size ForkJoinPool starves: the worker holding the outer
+        // barrier is not available to run the inner tasks. That is not a
+        // theoretical risk - it hung a live single-player server, with the
+        // server thread parked in awaitAll and all 14 workers idle in awaitWork
+        // (jstack, two dumps, same task object).
+        //
+        // Standing sharding down costs nothing, because RFC-0008 §1 already
+        // scopes it that way: block-entity sharding is "the solo-play lever,
+        // where region-level parallelism is a no-op because the world is one
+        // region". If two or more regions are already fanning out, the worker
+        // threads are in use and intra-region sharding has nothing left to win -
+        // it was only ever the answer for the single-bucket case.
+        //
+        // The alternative fix - flattening the colour passes into the outer
+        // barrier so there is one level of submission instead of two - would let
+        // both engage at once. It is a bigger change than a hang deserves, and
+        // it buys throughput this design does not claim.
+        boolean shardThisSection = sharded && !(parallel && buckets.size() >= 2);
         long[] partition = new long[buckets.size()];
         List<WeftScheduler.OwnedSection> sections = new ArrayList<>(buckets.size());
         int i = 0;

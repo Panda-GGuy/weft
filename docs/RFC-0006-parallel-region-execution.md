@@ -77,6 +77,47 @@ own tick path invokes it constantly.
 
 | **22** | **Hazard 4's premise, and the worker read path's dependency on a parked thread.** `ChunkMap.prepareEntityTickingChunk` (ChunkMap:364) is `getChunkRangeFuture(holder, radius 2, ChunkStatus.FULL)`: vanilla guarantees that before a chunk ticks entities, every chunk within radius 2 is *generated* to `ChunkStatus.FULL`. But `ChunkStatus.FULL` (generation) and `FullChunkStatus.FULL` (promotion) are different things reached by different futures, and hazards 1–4's read path asked about **promotion** — whose continuation is scheduled onto `ChunkMap.mainThreadMailbox` (ChunkMap:704) | **Hard crash, deterministic.** During a fanned-out section the main thread is parked at our barrier and cannot drain that mailbox, so a border chunk's `fullChunkFuture` stays incomplete for exactly as long as the section runs. Every read into the border ring answered null and hazard 4's guard turned that into a crash: three consecutive boots, three different chunks, every one a short-reach read at a chunk boundary (`Entity.updateFluidHeightAndDoFluidPushing` → `getFluidState` ×2, `Mob.serverAiStep` → `getBlockState`). **This is hazard 1 wearing a different hat** — a dependency on a future only the parked main thread can complete — which is why it was deterministic rather than racy | **FIXED.** Answer the question vanilla's invariant actually guarantees: when no promoted view exists, fall back to the generated-`FULL` view if it is a real `LevelChunk`. That is the same object and the same block states the main thread would hand a vanilla caller reading the same border chunk — `replaceProtoChunk` (GenerationChunkHolder:90) rewrites every status future *except* the last, so the `FULL` future holds the `LevelChunk` and not an `ImposterProtoChunk`. Scoped to `getChunk(..., load=true)` **only**: `getChunkNow` is vanilla's "only if loaded" probe, whose null is a loadedness answer, and it never crashed so it has nothing to be rescued from. Beyond radius 2 a null still fails loud, and still should — that is a read vanilla would have had to sync-load, the real bug hazard 4 was written to catch. Border reads are counted and surfaced in `/weft status` |
 
+| **23** | **Nested `runOwnedParallel` into the same fixed-size pool.** There are exactly two call sites: `RegionizedTicking.runBuckets` (region buckets) and `BlockEntityShards.runColoured` (colour-pass tasks). With `parallelRegions` **and** `blockEntitySharding` both on, and a level with >=2 region buckets and a region over the 64-unit gate, the outer fan-out puts a bucket body **on a pool worker**, and that body submits the inner colour passes back into the same pool and blocks on `Future.get()` | **Permanent hang.** Not a crash, so no crash report is produced and the client only reports a dead internal server. Server thread parked in `WeftScheduler.awaitAll` under `tickBlockEntitySectionOwned`; every engine worker idle in `ForkJoinPool.awaitWork`; the **same awaited task object** across two jstack dumps taken minutes apart. Found on a live single-player world (Create + AE2 + Chunky) and then reproduced deterministically in the suite | **FIXED** by removing the nesting rather than trying to survive it: sharding stands down whenever the section fans out (`sharded && !(parallel && buckets.size() >= 2)`). This costs nothing, because RFC-0008 §1 already scopes sharding as "the solo-play lever, where region-level parallelism is a no-op because the world is one region" — if two regions are already fanning out, the worker threads are in use and intra-region sharding has nothing left to win. Flattening the colour passes into the outer barrier would let both engage at once; that is a throughput feature this design does not claim, and a bigger change than a hang deserves |
+
+### Hazard 23: what is proven, and what is not
+
+**Proven.** The combination hangs; the trigger is `parallelRegions` +
+`blockEntitySharding` with >=2 region buckets and a region over the sharding
+gate; and removing the nesting fixes it. That last one is not an inference — the
+new `p2combined` gate passes with the one-line fix and **hangs the entire
+gametest server without it**, twice, with a server-thread stack identical to the
+live report.
+
+**Not proven.** *Why the JDK never runs the awaited task.* The obvious story is
+pool starvation — workers blocked in nested joins with none left to run the inner
+tasks — and it is wrong, or at least incomplete: in both the live hang and the
+lab repro **every worker is idle in `awaitWork`, not blocked in `awaitDone`**.
+Nothing is running, nothing is queued, and the coordinator waits on a task no
+thread is contending for. A submission-signalling or task-loss interaction is the
+remaining candidate and it is not yet demonstrated.
+
+That distinction matters beyond bookkeeping. If the real mechanism is anything
+other than "not enough workers", then **any** nested `runOwnedParallel` is
+suspect, and the next increment that adds one — entity sharding is the obvious
+candidate (RFC-0008 §5) — cannot assume a bigger pool makes it safe. The
+standing rule until it is understood: **one level of submission per section.**
+
+### Hazard 23 and the third repetition of the same test-design gap
+
+`p2parallelbench` calls `setBlockEntitySharding(false)`. `p2shardbench` calls
+`setParallel(false)`. Each isolates its own mechanism so its number means
+something — correct benchmarking discipline, and the reason both stayed green
+through a deadlock that any run with both flags on would have hit immediately.
+Meanwhile `TESTBUILD-0001` shipped a config turning on both.
+
+This is the third instance in one day of the same shape — hazard 21 (no rig had
+`Brain` AI), hazard 22 (no rig changed chunk status mid-section), hazard 23 (no
+rig set two flags at once). The pattern is not "our rigs are bad"; each was
+built to prove one thing and did. The pattern is that **the untested case is the
+interaction**, and the shipped configuration is itself a claim that needs a gate.
+`p2combined` is that gate, and any future flag pairing the product ships
+together needs one too.
+
 ### Hazard 22's fix, and the counter that caught the first attempt
 
 The first version of the fix put the fallback in the shared resolve path, so
@@ -257,6 +298,13 @@ region-readiness invariant it first looked like, but hazard 1's problem in
 disguise — a worker read path waiting on a future only the parked main thread
 could complete — and that has a bounded fix. **Opt-in is usable again**, on the
 evidence in hazard 22's verification note. Default-ON still waits on 19 and 20.
+
+**And an exit criterion added 2026-08-18 after hazard 23: every combination the
+product ships must have a gate.** Isolating flags is right for benchmarks and
+insufficient for release confidence. `TESTBUILD-0001` ships `parallelRegions` and
+`blockEntitySharding` together, and that pairing deadlocked while both
+single-flag benchmarks stayed green. No configuration may be shipped as
+recommended unless some gate exercises it as shipped.
 
 **And a fourth exit criterion, from the same soak: a live-server soak.** The
 list above is entirely rig-based, and rigs are what missed hazards 21 and 22.

@@ -213,6 +213,29 @@ behind a main thread that parks once per section. A count that keeps climbing
 during normal play would mean a worker reaching somewhere it should not, and now
 shows up as a number instead of an outage.
 
+### Hazard 23 - the two flags together ([#5](https://github.com/Panda-GGuy/weft/issues/5))
+
+Found after this document first shipped, by the config this document recommends.
+
+`parallelRegions` and `blockEntitySharding` were each tested alone and never
+together. With both on, two regions, and a region over the 64-block-entity gate,
+the server **hangs outright** - not crashes, so there is no crash report and the
+client just reports a dead internal server. A region bucket runs on a pool
+worker, calls the sharding pass, which submits back into the same pool and blocks
+on it.
+
+Fixed by standing sharding down whenever the section fans out, which costs
+nothing: RFC-0008 scopes sharding to the single-region case in the first place.
+**Consequence for you: on a multi-region world `blockEntitySharding` is now inert
+by design.** Leave it on - it is your only lever if you are ever down to one
+region, and it does nothing when you are not.
+
+What makes this one uncomfortable is that both single-flag benchmarks stayed
+green through it, and the shipped config turned on both. The new `p2combined`
+gate hangs the whole test server without the fix and passes with it, and "every
+combination the product ships must have a gate" is now an exit criterion in
+RFC-0006 section 5.
+
 ### What to keep from this
 
 Both bugs were found by five minutes of live play, after two green suite runs.
