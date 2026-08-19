@@ -120,6 +120,8 @@ public final class LegacyRouting {
         LegacyLane l = lane;
         if (l != null) {
             l.runTick();
+            // WS-7: the lane already timed its own pass; this only reads it.
+            dev.weft.neoforge.observability.WeftObservability.onLegacyLanePass(l.lastTickNanos());
         }
     }
 

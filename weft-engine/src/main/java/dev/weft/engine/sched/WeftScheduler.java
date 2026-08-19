@@ -16,6 +16,7 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
@@ -43,7 +44,13 @@ public final class WeftScheduler implements AutoCloseable {
         default void runEgress(long tick) {}
     }
 
-    private final ExecutorService pool;
+    /**
+     * Typed as {@link ForkJoinPool} rather than {@link ExecutorService} so WS-7
+     * can read its queue depth and steal count (RFC-0009 Appendix A).
+     * {@code Executors.newWorkStealingPool} has always returned one; naming the
+     * type is what makes the statistics reachable without a second pool.
+     */
+    private final ForkJoinPool pool;
     private final int parallelism;
     private final RegionManager regions;
     private final GraphScheduler graphs;
@@ -62,7 +69,7 @@ public final class WeftScheduler implements AutoCloseable {
     private volatile int lastMaxShards;
 
     public WeftScheduler(int parallelism, RegionManager regions, GraphScheduler graphs, Hooks hooks) {
-        this.pool = Executors.newWorkStealingPool(parallelism);
+        this.pool = (ForkJoinPool) Executors.newWorkStealingPool(parallelism);
         this.parallelism = parallelism;
         this.regions = regions;
         this.graphs = graphs;
@@ -215,6 +222,32 @@ public final class WeftScheduler implements AutoCloseable {
 
     public Map<TickPhase, Long> lastPhaseTimings() {
         return lastPhaseNanos;
+    }
+
+    // --- pool statistics (WS-7, RFC-0009 Appendix A) ---
+    //
+    // Read from the scrape thread. ForkJoinPool's accessors are documented as
+    // approximations gathered without synchronization, which is exactly the
+    // right trade for a 10-second gauge: a heisenbug-free estimate beats a
+    // precise number that costs the pool a barrier.
+
+    public int poolParallelism() {
+        return pool.getParallelism();
+    }
+
+    /**
+     * Tasks queued but not yet started. Non-zero means genuine backlog. Note
+     * this is <em>not</em> a utilisation signal: Weft's fan-out is barriered
+     * inside a vanilla tick section, so a 10-second sample almost always lands
+     * between sections and reads zero (RFC-0009 §3.3).
+     */
+    public long poolQueuedTasks() {
+        return pool.getQueuedTaskCount() + pool.getQueuedSubmissionCount();
+    }
+
+    /** Monotonic, and therefore the one pool figure a {@code rate()} is honest over. */
+    public long poolStealCount() {
+        return pool.getStealCount();
     }
 
     /** Execute one full pipeline tick. */

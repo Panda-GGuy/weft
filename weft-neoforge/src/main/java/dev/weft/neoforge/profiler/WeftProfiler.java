@@ -184,6 +184,42 @@ public final class WeftProfiler {
         return out;
     }
 
+    /**
+     * The current window as a JSON document (WS-7, RFC-0009 §6). Safe from any
+     * thread, like {@link #buildReport()}.
+     *
+     * <p>Additive: {@code weft-report.txt} is untouched and remains the human
+     * surface. This exists because a formatted table is useless for trend
+     * analysis, alerting or correlating a regression against a deployment.
+     */
+    public String buildReportJson() {
+        TickProfiler p = profiler;
+        List<TickProfiler.TickRecord> window = p == null ? List.of() : p.snapshotWindow();
+        int windowSize = p == null ? WeftConfig.PROFILE_WINDOW_TICKS : p.windowSize();
+        if (window.isEmpty()) {
+            // Absent, not zero: a document full of zeros would read as a
+            // measurement of an idle server rather than as no measurement.
+            return dev.weft.engine.telemetry.export.ProfilerSnapshotJson.render(
+                    null, 0, windowSize, WeftConfig.PROFILING_ENABLED);
+        }
+        List<TickSample> all = new ArrayList<>();
+        for (TickProfiler.TickRecord rec : window) {
+            all.addAll(rec.samples());
+        }
+        RegionizabilityAnalyzer.Report report = new RegionizabilityAnalyzer(
+                WeftConfig.MERGE_DISTANCE, WeftConfig.SPEEDUP_WORKER_COUNTS,
+                WeftConfig.REPORT_TOP_TYPES).analyze(all);
+        return dev.weft.engine.telemetry.export.ProfilerSnapshotJson.render(
+                report, window.size(), windowSize, WeftConfig.PROFILING_ENABLED);
+    }
+
+    /** Write {@code weft-report.json} beside the text report; returns the path. */
+    public Path writeReportJson(Path gameDir) throws IOException {
+        Path out = gameDir.resolve("weft-report.json");
+        Files.writeString(out, buildReportJson());
+        return out;
+    }
+
     public long tickCounter() {
         return tickCounter;
     }

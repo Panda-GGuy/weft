@@ -1,0 +1,288 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://weft.dev/schema/weft-events-v1.schema.json",
+  "title": "Weft event stream (RFC-0009 §5)",
+  "description": "One object per line of weft-events.ndjson. This file is the consumer-facing API contract: adding a field is compatible, renaming or removing one is not and requires the envelope 'v' to change so a consumer can reject rather than silently misinterpret. Enforced by EventSchemaTest, which asserts every emitted kind validates and that no kind exists without a schema branch.",
+  "type": "object",
+  "required": ["v", "ts", "kind", "server_id", "weft_version", "mc_version", "data"],
+  "additionalProperties": false,
+  "properties": {
+    "v": {
+      "description": "Envelope version. Bumped only on an incompatible change.",
+      "const": 1
+    },
+    "ts": {
+      "description": "RFC 3339, UTC, fixed millisecond precision.",
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "guard_trip",
+        "module_state_change",
+        "service_fallback",
+        "region_merge",
+        "region_split",
+        "profiler_snapshot",
+        "startup_posture",
+        "config_change",
+        "tick_outlier"
+      ]
+    },
+    "server_id": {
+      "description": "Random UUID generated once per install and persisted beside the world. Deliberately NOT derived from IP, hostname or player data: an event stream an operator ships to a log aggregator must not smuggle identifying data.",
+      "type": "string"
+    },
+    "weft_version": { "type": "string" },
+    "mc_version": { "type": "string" },
+    "data": { "type": "object" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "kind": { "const": "guard_trip" } } },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "RFC-0001 §4.4 forensics. The highest-value line in the file: what tried to mutate what it did not own, and what Weft did about it.",
+            "type": "object",
+            "required": ["kind", "severity", "thread", "context_kind", "context_owner",
+                         "target_kind", "target_id", "degradation"],
+            "properties": {
+              "kind": { "type": "string", "enum": ["region_mutation", "shard_mutation"] },
+              "severity": {
+                "description": "The mode-dependent outcome, which is what decides whether a human must be paged.",
+                "type": "string",
+                "enum": ["dev_throw", "degraded_to_mail", "hardened_throw"]
+              },
+              "thread": { "type": "string" },
+              "context_kind": {
+                "type": "string",
+                "enum": ["REGION", "SHARD", "LEGACY", "GLOBAL", "GRAPH", "NONE"]
+              },
+              "context_owner": { "type": "integer" },
+              "target_kind": { "type": "string", "enum": ["region", "shard"] },
+              "target_id": { "type": "integer" },
+              "degradation": {
+                "description": "What happened to the mutation: routed as mail to its owner, or refused by throwing.",
+                "type": "string",
+                "enum": ["routed_as_mail", "threw"]
+              },
+              "stack": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "module_state_change" } } },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": ["module", "from", "to"],
+            "properties": {
+              "module": { "type": "string" },
+              "from": { "$ref": "#/$defs/moduleState" },
+              "to": { "$ref": "#/$defs/moduleState" },
+              "reason": { "type": "string" },
+              "neighbor": {
+                "description": "The modid yielded or refused to, when the transition was a coexistence outcome.",
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "service_fallback" } } },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": ["service", "reason"],
+            "properties": {
+              "service": { "type": "string" },
+              "level": { "type": "string" },
+              "reason": { "type": "string" },
+              "consecutive": { "type": "integer" },
+              "latched": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "kind": { "enum": ["region_merge", "region_split"] } }
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": ["level", "region_ids", "result_ids"],
+            "properties": {
+              "level": { "type": "string" },
+              "region_ids": {
+                "description": "Region ids going in: the regions merged, or the single region split.",
+                "type": "array",
+                "items": { "type": "integer" }
+              },
+              "result_ids": {
+                "description": "Region ids coming out.",
+                "type": "array",
+                "items": { "type": "integer" }
+              },
+              "chunks_before": { "type": "integer" },
+              "chunks_after": { "type": "integer" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "profiler_snapshot" } } },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "The /weft report window as data. Derived fields are absent when ticks_analyzed is 0, rather than present as zeros that would read as a measurement of an idle server.",
+            "type": "object",
+            "required": ["window_size", "ticks_analyzed", "profiling_enabled"],
+            "properties": {
+              "window_size": { "type": "integer" },
+              "ticks_analyzed": { "type": "integer" },
+              "profiling_enabled": { "type": "boolean" },
+              "total_nanos": { "type": "integer" },
+              "spatial_nanos": { "type": "integer" },
+              "global_nanos": { "type": "integer" },
+              "entity_nanos": { "type": "integer" },
+              "entity_ai_nanos": { "type": "integer" },
+              "throttleable_nanos": { "type": "integer" },
+              "activation_saved_nanos": { "type": "integer" },
+              "throttleable_ai_nanos": { "type": "integer" },
+              "activation_ai_saved_nanos": { "type": "integer" },
+              "regions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["region_id", "chunk_count", "nanos"],
+                  "properties": {
+                    "region_id": { "type": "integer" },
+                    "chunk_count": { "type": "integer" },
+                    "nanos": { "type": "integer" }
+                  }
+                }
+              },
+              "top_types": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["type_id", "nanos", "count"],
+                  "properties": {
+                    "type_id": { "type": "string" },
+                    "nanos": { "type": "integer" },
+                    "count": { "type": "integer" }
+                  }
+                }
+              },
+              "speedup_by_workers": {
+                "description": "Worker count (as a string key, per JSON) to estimated speedup.",
+                "type": "object",
+                "additionalProperties": { "type": "number" }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "startup_posture" } } },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "The full RFC-0003 R5 posture table, once at boot, structured.",
+            "type": "object",
+            "required": ["modules"],
+            "properties": {
+              "modules": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["module", "state"],
+                  "properties": {
+                    "module": { "type": "string" },
+                    "state": { "$ref": "#/$defs/moduleState" },
+                    "detail": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "config_change" } } },
+      "then": {
+        "properties": {
+          "data": {
+            "type": "object",
+            "required": ["key", "to", "source"],
+            "properties": {
+              "key": { "type": "string" },
+              "from": { "type": ["string", "number", "boolean", "null"] },
+              "to": { "type": ["string", "number", "boolean", "null"] },
+              "source": { "type": "string", "enum": ["file", "command"] }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "tick_outlier" } } },
+      "then": {
+        "properties": {
+          "data": {
+            "description": "A tick past tickOutlierFactor x the rolling median, with the top cost sources attached — exactly the information a human wants about a spike and never has.",
+            "type": "object",
+            "required": ["tick", "duration_seconds", "median_seconds", "factor"],
+            "properties": {
+              "tick": { "type": "integer" },
+              "duration_seconds": { "type": "number" },
+              "median_seconds": { "type": "number" },
+              "factor": { "type": "number" },
+              "top_sources": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["source", "type", "seconds"],
+                  "properties": {
+                    "source": {
+                      "type": "string",
+                      "enum": ["ENTITY", "BLOCK_ENTITY", "GLOBAL"]
+                    },
+                    "type": { "type": "string" },
+                    "seconds": { "type": "number" }
+                  }
+                }
+              },
+              "phase_breakdown": {
+                "description": "Engine pipeline phase to seconds. NOT vanilla's tick sections — see RFC-0009 §3.1.",
+                "type": "object",
+                "additionalProperties": { "type": "number" }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "moduleState": {
+      "description": "The five states the RFC-0003 R5 table collapses CoexistencePolicy's seven onto. Derived from the same function /weft status renders, so the metric, the table and the event cannot disagree.",
+      "type": "string",
+      "enum": ["active", "yielded", "self_disabled", "disabled", "refused"]
+    }
+  }
+}

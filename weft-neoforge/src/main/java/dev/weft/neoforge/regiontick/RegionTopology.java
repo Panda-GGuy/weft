@@ -53,6 +53,30 @@ public final class RegionTopology {
 
     private RegionTopology() {}
 
+    /**
+     * WS-7's view of topology mutation (RFC-0009 §5). One observer, attached only
+     * while the observability module is active.
+     */
+    public interface TopologyObserver {
+
+        /**
+         * @param merge      true for a merge, false for a split
+         * @param sourceId   the surviving region on a merge; the region that shed
+         *                   components on a split
+         * @param otherIds   absorbed regions on a merge; new regions on a split
+         * @param chunksAfter chunks in {@code sourceId} once the change landed
+         */
+        void onChange(String levelId, boolean merge, long sourceId, long[] otherIds,
+                      int chunksAfter);
+    }
+
+    private static volatile TopologyObserver observer;
+
+    /** Attach WS-7's observer, or {@code null} to detach (RFC-0003 R6). */
+    public static void setTopologyObserver(TopologyObserver value) {
+        observer = value;
+    }
+
     private static final ConcurrentHashMap<ServerLevel, RegionManager> managers =
             new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<ServerLevel, AtomicBoolean> splitDirty =
@@ -124,6 +148,29 @@ public final class RegionTopology {
             // INGEST, one tick late, rare. Scheduler gone (server stopping):
             // dropped, its target state is being torn down with it (same
             // contract as WeftMod.postToOwner).
+            // WS-7 (RFC-0009 §5): merges and splits become events, with the
+            // level label RegionManager has no way to know. Installed
+            // unconditionally and cheap — the listener returns immediately when
+            // no observer is attached, so R6 holds without re-walking managers
+            // every time the module flips.
+            String levelId = l.dimension().location().toString();
+            manager.setTopologyListener(new dev.weft.engine.region.RegionManager.TopologyListener() {
+                @Override
+                public void onMerge(long resultId, long[] absorbedIds, int chunksAfter) {
+                    TopologyObserver o = observer;
+                    if (o != null) {
+                        o.onChange(levelId, true, resultId, absorbedIds, chunksAfter);
+                    }
+                }
+
+                @Override
+                public void onSplit(long sourceId, long[] resultIds, int chunksAfter) {
+                    TopologyObserver o = observer;
+                    if (o != null) {
+                        o.onChange(levelId, false, sourceId, resultIds, chunksAfter);
+                    }
+                }
+            });
             manager.setStrandedMailSink(m -> {
                 dev.weft.engine.sched.WeftScheduler s = WeftMod.schedulerOrNull();
                 if (s != null) {

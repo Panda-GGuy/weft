@@ -232,7 +232,9 @@ ops tooling and is the adoption wedge for server admins.
   through an API nobody offers. The one-way `spark-api` *read* (WS-6.2's GC
   data, and a `/weft report` MSPT cross-check) is a separate soft dependency;
   `tps()`/`mspt()` are `@Nullable`, so a null path is required.
-- **Amended by [RFC-0009](RFC-0009-observability-exporter.md) (draft 1):** the
+- **Amended by [RFC-0009](RFC-0009-observability-exporter.md) — shipped, gates
+  green, overhead measured (RFC-0009 §9.4: within ±0.5% median MSPT at the 10s
+  cadence, from a harness that resolves a 200x cadence at +6-8%):** the
   exact metric names, event-stream envelope and schema, `[observability]`
   config block, and RFC-0003 compliance are decided there — the surface is API
   the day it ships, and seven of the series sketched above needed a rename, a

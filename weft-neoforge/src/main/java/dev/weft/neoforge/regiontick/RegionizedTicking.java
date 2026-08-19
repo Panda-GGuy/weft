@@ -257,7 +257,8 @@ public final class RegionizedTicking {
                 }
             }));
         }
-        String[] threads = runBuckets(engine, sections);
+        String[] threads = runBuckets(engine, sections,
+                level.dimension().location().toString(), "ENTITY");
         if (!tail.isEmpty()) {
             unmappedUnits.add(tail.size());
             engine.runOwnedSerial(ownerId(level), () -> {
@@ -331,7 +332,8 @@ public final class RegionizedTicking {
                 }
             }));
         }
-        String[] beThreads = runBuckets(engine, sections);
+        String[] beThreads = runBuckets(engine, sections,
+                level.dimension().location().toString(), "BLOCK_ENTITY");
         if (!tail.isEmpty()) {
             unmappedUnits.add(tail.size());
             engine.runOwnedSerial(ownerId(level), () -> tail.forEach(Runnable::run));
@@ -352,19 +354,51 @@ public final class RegionizedTicking {
      */
     private static String[] runBuckets(WeftScheduler engine,
                                        List<WeftScheduler.OwnedSection> sections) {
+        return runBuckets(engine, sections, "", "");
+    }
+
+    /**
+     * As above, additionally carrying the WS-7 timing probe (RFC-0009 §9.2 — the
+     * one new measurement this workstream adds, and the one the review approved).
+     *
+     * <p><b>Cost: two {@code System.nanoTime()} calls per BUCKET per section, plus
+     * one pair around the barrier.</b> O(buckets), not O(units): the existing P0
+     * profiler pays two per <em>entity</em>. On a solo world — one region, which is
+     * the WS-10 case — that is two clock reads for the whole section.
+     *
+     * <p>Double-gated on the observability module being active and on
+     * {@code regionTimingEnabled}. When off, the {@code long[]} is never allocated
+     * and no clock is read (R6: zero residue). What it buys is per-region tick
+     * duration, hottest-region share, and a worker-utilisation ratio that is a
+     * real work-conservation figure rather than a scrape-time sample of an idle
+     * pool (§3.3).
+     */
+    private static String[] runBuckets(WeftScheduler engine,
+                                       List<WeftScheduler.OwnedSection> sections,
+                                       String levelId, String sectionKind) {
         String[] threads = new String[sections.size()];
-        if (parallel && sections.size() >= 2) {
+        boolean timing = !levelId.isEmpty()
+                && dev.weft.neoforge.observability.WeftObservability.regionTimingActive();
+        long[] bucketNanos = timing ? new long[sections.size()] : null;
+        long sectionStart = timing ? System.nanoTime() : 0L;
+        boolean fannedOut = parallel && sections.size() >= 2;
+
+        if (fannedOut) {
             List<WeftScheduler.OwnedSection> wrapped = new ArrayList<>(sections.size());
             for (int i = 0; i < sections.size(); i++) {
                 final int index = i;
                 WeftScheduler.OwnedSection section = sections.get(i);
                 wrapped.add(new WeftScheduler.OwnedSection(section.ownerId(), () -> {
                     threads[index] = Thread.currentThread().getName();
+                    long bucketStart = timing ? System.nanoTime() : 0L;
                     ParallelAccess.enterWorker();
                     try {
                         section.work().run();
                     } finally {
                         ParallelAccess.exitWorker();
+                        if (timing) {
+                            bucketNanos[index] = System.nanoTime() - bucketStart;
+                        }
                     }
                 }));
             }
@@ -373,8 +407,18 @@ public final class RegionizedTicking {
             for (int i = 0; i < sections.size(); i++) {
                 threads[i] = Thread.currentThread().getName();
                 WeftScheduler.OwnedSection section = sections.get(i);
+                long bucketStart = timing ? System.nanoTime() : 0L;
                 engine.runOwnedSerial(section.ownerId(), section.work());
+                if (timing) {
+                    bucketNanos[i] = System.nanoTime() - bucketStart;
+                }
             }
+        }
+
+        if (timing) {
+            dev.weft.neoforge.observability.WeftObservability.onSectionBuckets(
+                    levelId, sectionKind, bucketNanos,
+                    System.nanoTime() - sectionStart, fannedOut);
         }
         return threads;
     }

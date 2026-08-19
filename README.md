@@ -334,6 +334,97 @@ shape (2000 tickables, one region): **1637 us serial vs 254 us sharded
 per RFC-0004 §2.5 — within-tick interleaving is not vanilla's exact list
 order — and the engine does not own real entity ticking until P2 anyway.
 
+**WS-7 observability exporter — structured telemetry egress**
+([RFC-0009](docs/RFC-0009-observability-exporter.md), 2026-08-17): `/weft
+report` was the only way out of the profiler, which is fine for a human reading
+one server and useless for trend analysis, alerting or correlating a regression
+against a deployment. Two surfaces now exist, both **off by default**: a
+**Prometheus scrape endpoint** (`/metrics`, Prometheus text by default,
+OpenMetrics by `Accept` negotiation) and a **newline-delimited JSON event
+stream** for the discrete things a 10-second gauge sample loses — guard trips
+with full RFC-0001 §4.4 forensics, module state changes, service fallbacks,
+region merges/splits, config changes, and tick outliers with the top cost
+sources attached. `/weft report --json` writes `weft-report.json` beside the
+unchanged text report. Dashboard JSON is in
+[`dashboards/weft-overview.json`](dashboards/weft-overview.json); the flagship
+panel is **per-mod legacy-lane cost** — RFC-0001 §9.1's "your tick is 61% mod X"
+number, which nothing else in the ecosystem can tell an operator.
+
+**Loopback by default, and deliberately unauthenticated.** `metricsBindAddress`
+defaults to `127.0.0.1`, because an exposed metrics port leaks your mod list,
+player counts and world topology. There is no auth and no TLS on the endpoint by
+design — that is the deployment's job by Prometheus convention, and a half-built
+auth scheme is worse than none. Remote scraping is your explicit decision: change
+the address, ideally behind your own reverse proxy.
+
+**Measured overhead.** RFC-0002's criterion is "unmeasurable at 10s scrape
+interval". The harness is a same-run, six-phase interleaved A/B — OFF / ON@10s /
+ON@every-tick, twice over, 200 ticks each, 1200 mobs and a bot — scraped from its
+own thread, because that is where a scrape happens in production.
+
+| Condition | Median MSPT | Delta |
+|---|---|---|
+| Exporter off | 10.26 / 10.92 ms | — |
+| **On, scraped at the 10s cadence** | 10.30 / 10.91 ms | **+0.42% / −0.12%** |
+| Control: on, scraped every tick (200×) | 11.13 / 11.62 ms | **+8.5% / +6.4%** |
+
+So: **inside ±0.5% at the shipping cadence, from a harness that resolves a 200×
+cadence at +6 to +8%.** That second column is the load-bearing one and was not in
+the reviewed plan. RFC-0002 asks for overhead that is *unmeasurable*, and a null
+result only counts as evidence if the same instrument can be shown to resolve a
+load it should resolve — otherwise "we saw nothing" and "the instrument is broken"
+produce identical output. Both figures are tracked nightly on `bench-data`
+(`ws7_exporter_overhead_pct`, `ws7_exporter_control_overhead_pct`).
+
+Getting there took two corrections that the control surfaced, and earlier readings
+under the broken harnesses (+0.1%, +2.6%, −3.4%, −1.4%) are **discarded, not
+averaged in**. First, the harness scraped from inside `onEachTick`, so it timed the
+server thread blocking on a localhost HTTP round trip — ~56 ms per scrape that no
+real tick pays, since Prometheus is another process and the exporter answers on its
+own thread. A +514% control reading was too large to believe and exposed it.
+Second, `startExporter` called `WeftModules.resolve()`, which re-resolves *every*
+module from config: the first OFF phase ran with the P1 services pinned off and
+every later phase ran with them on, so the OFF pool mixed two different worlds.
+That one explains the sign flips. The phases now toggle the exporter alone.
+
+Honest caveats worth reading before trusting a panel:
+
+- **Panels fed by an inactive module are empty, not zero.** A zero is a
+  measurement claim — `weft_legacy_mod_cost_seconds_total 0` would say "mod X
+  costs nothing" where absence says "Weft is not attributing legacy cost right
+  now". The per-mod panel is blank on a server with `legacyLane` off, and that is
+  correct.
+- **`weft_tick_period_seconds` is the tick *period*, not its work.** Vanilla's
+  loop sleeps to hold 20 TPS, so it reads ~50 ms on any healthy server no matter
+  the load. For MSPT use `weft_mspt_seconds`, which is vanilla's own 100-tick
+  mean — the number `/tps` and spark report.
+- **`weft_jvm_gc_*` is a counter pair, not a pause histogram.** A histogram needs
+  a GC notification listener, and pause attribution is WS-6.2's territory;
+  `rate(gc_seconds)/rate(gc_collections)` is mean pause meanwhile. Set
+  `jvmMetricsEnabled = false` if another exporter already covers your JVM.
+- **Cost attribution is a gauge over the profiler window, not a counter.** The
+  window is rolling, so a `_total` would walk downwards and `rate()` over it
+  would be nonsense (RFC-0009 §3.2).
+- **No registry rows for the exporter mods.** Two of the five are Bukkit plugins
+  with no modid, one has no 1.21.1 build, and two have unverified modids — and
+  `cooperate` is already the default for unknown mods, so the rows would change
+  nothing while looking like coverage. The real conflict is a **port collision,
+  detected by binding**, which also catches plugins, proxies and unrelated
+  processes that a modid registry never would. It cannot name the holder, though:
+  that needs process inspection, which RFC-0003 §4 forbids.
+
+Gates, all green back-to-back: exposition-format conformance through a strict
+reader in JUnit plus `promtool check metrics` in CI over a scrape captured from a
+real booted server; correctness against the RFC-0005 parity arena with a
+vacuous-run guard; the committed `weft-events.schema.json` validated by a real
+JSON Schema implementation for every emitted kind; the cardinality cap; and
+fail-soft for both a taken port and an unwritable sink. Those gates earned their
+keep immediately — they caught a `Long.MIN_VALUE` subtraction overflow that
+silently cost the exporter every per-level and per-module series while the
+endpoint still looked healthy, a cached metric handle that stopped exporting
+after a single-player world reload, and a benchmark harness that was timing an
+HTTP round trip the tick never actually waits for.
+
 ## Trying the P0 profiler locally
 
 1. Build the jar: \`./gradlew :weft-neoforge:build -PwithNeoForge\`

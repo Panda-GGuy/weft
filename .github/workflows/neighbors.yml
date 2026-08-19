@@ -48,6 +48,24 @@ jobs:
             # regionized_ticking posture is deliberately unset pending RFC-0006's
             # light-engine audit item; extend this cell when either lands.
             expectations: 'profiler +ACTIVE|cooperating with scalablelux|spawn_density +ACTIVE'
+          - neighbor: metrics-port
+            # WS-7 / RFC-0009 §8.1. The only real conflict the observability
+            # module has with a neighbouring exporter is a PORT COLLISION, and a
+            # port collision is detected by binding rather than by modid — which
+            # is why it also catches Bukkit plugins behind a proxy, unrelated
+            # processes, and exporters that do not exist yet. Deliberately not a
+            # registry row: two of the five known exporters are Bukkit plugins
+            # with no modid, one has no 1.21.1 build, two have unverified modids,
+            # and `cooperate` is already the default for unknown mods. So this
+            # cell boots with the port already held and asserts the module yields
+            # it, self-disables (rung 3) and leaves the server clean.
+            # The stub modid is inert here; the port is the whole test.
+            expectations: 'observability +SELF-DISABLED|already in use'
+            occupy_port: '19940'
+            weft_config: |
+              [observability]
+              metricsEnabled = true
+              metricsPort = 19940
           - neighbor: forgia
             # Rung 4: a tick-ownership engine. regionizedTicking is enabled in
             # the cell's config so the conflict actually resolves (a module
@@ -64,6 +82,9 @@ jobs:
       - name: Boot with stub neighbor and assert posture
         env:
           WEFT_CONFIG_TOML: ${{ matrix.weft_config || '' }}
+          # WS-7's port-collision cell (RFC-0009 §8.1): hold the port before boot
+          # so the module has to detect it by binding, and yield it.
+          WEFT_OCCUPY_PORT: ${{ matrix.occupy_port || '' }}
         run: |
           IFS='|' read -ra EXPECT <<< "${{ matrix.expectations }}"
           bash scripts/neighbors/neighbor-boot-test.sh "${{ matrix.neighbor }}" "${EXPECT[@]}"
