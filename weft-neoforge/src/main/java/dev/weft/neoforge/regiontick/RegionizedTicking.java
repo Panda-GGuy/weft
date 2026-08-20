@@ -143,6 +143,7 @@ public final class RegionizedTicking {
     private static final ThreadLocal<FusedPhase> fusedPhase =
             ThreadLocal.withInitial(() -> FusedPhase.NONE);
     private static final ThreadLocal<FusedRegionUnits> fusedCurrentUnits = new ThreadLocal<>();
+    private static final ThreadLocal<Long> fusedCurrentRegion = new ThreadLocal<>();
     // Server-thread-only slots during the wrapped vanilla BE collection pass.
     private static FusedLevelUnits fusedCaptureUnits;
     private static java.util.HashMap<Long, Region> fusedCaptureRegions;
@@ -151,6 +152,7 @@ public final class RegionizedTicking {
     private static final class FusedFrame {
         final TreeMap<Long, List<Entity>> entities = new TreeMap<>();
         final java.util.HashMap<Long, Region> regions = new java.util.HashMap<>();
+        final List<Entity> tail = new ArrayList<>();
         final Consumer<Entity> ticker;
 
         FusedFrame(Consumer<Entity> ticker) {
@@ -590,8 +592,16 @@ public final class RegionizedTicking {
             Region region = topology.regionAt(chunk.x, chunk.z);
             if (region == null) {
                 unmapped[0]++;
+                frame.tail.add(entity);
+                return;
             }
-            long regionId = region == null ? ownerId(level) : region.id();
+            if (parallel && (MemoryReachEntities.isMemoryReach(entity)
+                    || !readNeighbourhoodLive(level, chunk.x, chunk.z))) {
+                unreadyUnits.increment();
+                frame.tail.add(entity);
+                return;
+            }
+            long regionId = region.id();
             frame.entities.computeIfAbsent(regionId, ignored -> new ArrayList<>()).add(entity);
             if (region != null) {
                 frame.regions.putIfAbsent(regionId, region);
@@ -789,6 +799,7 @@ public final class RegionizedTicking {
                     },
                     () -> {
                         try {
+                            fusedCurrentRegion.set(regionId);
                             fusedCurrentUnits.set(units);
                             fusedPhase.set(FusedPhase.ENTITY);
                             try {
@@ -796,6 +807,7 @@ public final class RegionizedTicking {
                             } finally {
                                 fusedPhase.remove();
                                 fusedCurrentUnits.remove();
+                                fusedCurrentRegion.remove();
                             }
                         } catch (Throwable failure) {
                             if (runParallel) {
@@ -816,6 +828,10 @@ public final class RegionizedTicking {
                     })));
         }
         engine.runOwnedFused(tasks, runParallel);
+
+        if (!frame.tail.isEmpty()) {
+            engine.runOwnedSerial(ownerId(level), () -> frame.tail.forEach(frame.ticker));
+        }
 
         drainSectionEndTasks();
         fusedTicks.increment();
@@ -875,6 +891,8 @@ public final class RegionizedTicking {
                                                FusedLevelUnits levelUnits,
                                                FusedRegionUnits units,
                                                boolean shardThisTick) {
+        fusedCurrentRegion.set(regionId);
+        try {
         units.fresh.tick(BlockEntity::isRemoved, blockEntity -> {
             fusedCurrentUnits.set(units);
             fusedPhase.set(FusedPhase.FRESH);
@@ -920,6 +938,9 @@ public final class RegionizedTicking {
             fusedPhase.remove();
             fusedCurrentUnits.remove();
         }
+        } finally {
+            fusedCurrentRegion.remove();
+        }
     }
 
     /** Level.addBlockEntityTicker wrap: true means fused owner container accepted it. */
@@ -938,6 +959,11 @@ public final class RegionizedTicking {
         }
         BeTickUnit captured = makeBeTickUnit(level, ticker, unit);
         FusedPhase phase = fusedPhase.get();
+        Long currentRegion = fusedCurrentRegion.get();
+        if (currentRegion != null && currentRegion.longValue() != region.id()) {
+            throw new IllegalStateException("singleJoinTick cross-owner ticker add from region "
+                    + currentRegion + " to " + region.id() + " at " + ticker.getPos());
+        }
         if (phase == FusedPhase.CAPTURE && level == fusedCaptureLevel) {
             fusedCaptureRegions.putIfAbsent(region.id(), region);
             fusedCaptureUnits.addTicker(region.id(), captured);
@@ -977,22 +1003,6 @@ public final class RegionizedTicking {
         return true;
     }
 
-    /** NeoForge onLoad call wrap during collection; transfers prior global entries once. */
-    public static boolean captureFusedExistingFresh(ServerLevel level, BlockEntity blockEntity) {
-        if (!singleJoin || fusedPhase.get() != FusedPhase.CAPTURE
-                || level != fusedCaptureLevel) {
-            return false;
-        }
-        BlockPos pos = blockEntity.getBlockPos();
-        Region region = RegionTopology.managerFor(level).regionAtBlock(pos.getX(), pos.getZ());
-        if (region == null) {
-            throw new IllegalStateException("singleJoinTick existing fresh BE has no region at " + pos);
-        }
-        fusedCaptureRegions.putIfAbsent(region.id(), region);
-        fusedCaptureUnits.region(region.id()).fresh.add(blockEntity);
-        return true;
-    }
-
     /** Level.addFreshBlockEntities wrap: true means fused owner containers accepted them. */
     public static boolean captureFusedFreshBlockEntities(ServerLevel level,
                                                          java.util.Collection<BlockEntity> fresh) {
@@ -1008,6 +1018,11 @@ public final class RegionizedTicking {
             FusedRegionUnits units = fusedCurrentUnits.get();
             FusedLevelUnits levelUnits = fusedUnits.get(level);
             FusedPhase phase = fusedPhase.get();
+            Long currentRegion = fusedCurrentRegion.get();
+            if (currentRegion != null && currentRegion.longValue() != region.id()) {
+                throw new IllegalStateException("singleJoinTick cross-owner fresh BE add from region "
+                        + currentRegion + " to " + region.id() + " at " + pos);
+            }
             if (phase == FusedPhase.CAPTURE && level == fusedCaptureLevel) {
                 fusedCaptureRegions.putIfAbsent(region.id(), region);
                 fusedCaptureUnits.region(region.id()).fresh.add(blockEntity);
