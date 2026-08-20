@@ -2,8 +2,8 @@
 
 Date: 2026-08-20
 Branch: `crew/release-commit-duty`
-Commit: pending (`docs(release): record merged hygiene handoff`)
-Push: pending
+Commit: `c8f2224` (`docs(release): record merged hygiene handoff`)
+Push: `origin/crew/release-commit-duty` updated successfully
 Pull request: none; release-hygiene PR #19 merged to `main` as `ac40243`
 
 ## Increment
@@ -28,6 +28,8 @@ Pull request: none; release-hygiene PR #19 merged to `main` as `ac40243`
 - `gh pr view 14 --json ...`
 - `gh pr view 15 --json ...`
 - `git diff --check`
+- `git commit -m "docs(release): record merged hygiene handoff"`
+- `git push -u origin crew/release-commit-duty`
 
 ## Leftover risks
 
