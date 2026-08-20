@@ -201,6 +201,68 @@ public final class WeftScheduler implements AutoCloseable {
         return ownedParallelSections.sum();
     }
 
+    /**
+     * One region's fused single-join task (RFC-0007 §4): the ordered stages —
+     * mail drain, entity bucket, block-entity bucket — that run as one
+     * uninterrupted unit under one REGION context. Stages execute in list
+     * order on the same thread; nothing between them yields the context or
+     * synchronizes with other regions.
+     */
+    public record FusedRegionTask(long ownerId, List<Runnable> stages) {}
+
+    private final LongAdder fusedTasks = new LongAdder();
+
+    /**
+     * Run one fused task per region with a single join for the whole set —
+     * the increment-7 execution shape: region A's last stage may complete
+     * while region B's first stage is still running; the caller (the server
+     * thread) barriers exactly once, here, when every region's every stage
+     * is done. {@code parallel} false is the serial-equivalent path: tasks
+     * run one after another on the calling thread in list order (callers
+     * pass canonical ascending-owner order), each still as one uninterrupted
+     * unit — the increment-4 shape of this increment, for proving the fusion
+     * seam before threads arrive.
+     *
+     * <p>A failing stage fails its task; a failed task propagates as
+     * {@link IllegalStateException} after the join, exactly like
+     * {@link #runOwnedParallel(List)} — a crashing tick crashes the server.
+     */
+    public void runOwnedFused(List<FusedRegionTask> tasks, boolean parallel) {
+        try {
+            if (parallel && tasks.size() >= 2) {
+                List<OwnedSection> sections = new ArrayList<>(tasks.size());
+                for (FusedRegionTask task : tasks) {
+                    sections.add(new OwnedSection(task.ownerId(), () -> runStages(task)));
+                }
+                runOwnedParallel(sections);
+            } else {
+                for (FusedRegionTask task : tasks) {
+                    ThreadContext.enter(ThreadContext.Kind.REGION, task.ownerId());
+                    try {
+                        runStages(task);
+                    } finally {
+                        ThreadContext.exit();
+                    }
+                }
+            }
+        } finally {
+            // Counted even on a crashing tick, like runOwnedParallel: the
+            // engagement probe must not undercount the section that failed.
+            fusedTasks.add(tasks.size());
+        }
+    }
+
+    private static void runStages(FusedRegionTask task) {
+        for (Runnable stage : task.stages()) {
+            stage.run();
+        }
+    }
+
+    /** Fused region tasks run through {@link #runOwnedFused} since boot. */
+    public long fusedTasks() {
+        return fusedTasks.sum();
+    }
+
     /** Entry point for cross-thread submissions (network threads, console). */
     public void submit(Message message) {
         globalInbox.post(message);
