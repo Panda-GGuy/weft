@@ -80,6 +80,12 @@ public final class RegionizedTicking {
     private static final LongAdder blockEntitySections = new LongAdder();
     private static final LongAdder partitionedSections = new LongAdder();
     private static final LongAdder unmappedUnits = new LongAdder();
+    /** Navigation updates deferred by hazard 21, used by its non-vacuous gate. */
+    private static final LongAdder deferredNavigationUpdates = new LongAdder();
+    /** Hazard-21 callbacks observed after the barrier on the server thread. */
+    private static final LongAdder completedNavigationUpdates = new LongAdder();
+    /** Fail-loud counter: a deferred navigation callback must never run elsewhere. */
+    private static final LongAdder misplacedNavigationUpdates = new LongAdder();
 
     /** Region ids of the most recent partitioned sections (gametest probes). */
     private static volatile long[] lastEntityPartition = new long[0];
@@ -315,6 +321,9 @@ public final class RegionizedTicking {
         lastEntityPartitionThreads = new String[0];
         lastBlockEntityPartitionThreads = new String[0];
         sectionEndTasks.clear();
+        deferredNavigationUpdates.reset();
+        completedNavigationUpdates.reset();
+        misplacedNavigationUpdates.reset();
     }
 
     /**
@@ -654,6 +663,42 @@ public final class RegionizedTicking {
         sectionEndTasks.add(task);
     }
 
+    /**
+     * Hazard 21's measured deferral path. The callback is intentionally
+     * wrapped here rather than counted in the mixin so completion records the
+     * actual post-barrier execution thread, not merely queue admission.
+     */
+    public static void deferNavigationUpdate(ServerLevel level, Runnable task) {
+        deferredNavigationUpdates.increment();
+        deferToSectionEnd(() -> {
+            if (Thread.currentThread() != level.getServer().getRunningThread()) {
+                misplacedNavigationUpdates.increment();
+                throw new IllegalStateException(
+                        "deferred navigation update did not run on the server thread");
+            }
+            task.run();
+            completedNavigationUpdates.increment();
+        });
+    }
+
+    /** Test hook: invoke the real sendBlockUpdated mixin path inside an owned worker bucket. */
+    public static boolean runNavigationUpdateProbe(ServerLevel level, Runnable workerUpdate) {
+        WeftScheduler engine = active && parallel ? WeftMod.schedulerOrNull() : null;
+        if (engine == null) {
+            return false;
+        }
+        engine.runOwnedParallel(List.of(new WeftScheduler.OwnedSection(ownerId(level), () -> {
+            ParallelAccess.enterWorker();
+            try {
+                workerUpdate.run();
+            } finally {
+                ParallelAccess.exitWorker();
+            }
+        })));
+        drainSectionEndTasks();
+        return true;
+    }
+
     private static void drainSectionEndTasks() {
         Runnable task;
         while ((task = sectionEndTasks.poll()) != null) {
@@ -717,6 +762,18 @@ public final class RegionizedTicking {
     /** Units whose chunk had no topology region (should stay 0). */
     public static long unmappedUnits() {
         return unmappedUnits.sum();
+    }
+
+    public static long deferredNavigationUpdates() {
+        return deferredNavigationUpdates.sum();
+    }
+
+    public static long completedNavigationUpdates() {
+        return completedNavigationUpdates.sum();
+    }
+
+    public static long misplacedNavigationUpdates() {
+        return misplacedNavigationUpdates.sum();
     }
 
     /**

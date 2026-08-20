@@ -1,5 +1,19 @@
 ﻿# weft-parity memory
 
+## Recovery checkpoint — 2026-08-20
+- PR #14 parity review is BLOCK at head `432f831`: fused hazard-24 readiness
+  failure counts `unreadyUnits` but still runs BE ticker on worker; fused entity
+  tail runs after region BE stages; `p2fuse` lacks deterministic
+  overlap/pending/fallback proof. Review id: `4979884858`.
+- Focused #3 patch adds `p2navdefer` counters and villager/door navigation
+  invalidation under two-region fan-out. Compile gate passes. First full suite
+  exposed indirect-trigger flaw (fixed) plus disk exhaustion; final revision
+  has not completed GameTest, so #3 stays OPEN.
+- #6 stays OPEN pending `p2evictionchurn`. #16 keeps Moonrise + parallel
+  posture at yield/refuse; field ON/OFF data is not fan-out proof because owned
+  parallel work was often zero.
+- Full report: `.crew/memory/_session/parity-recovery-report-2026-08-20.md`.
+
 ## Standing notes
 - Full gametest suite (`./gradlew :weft-neoforge:runGameTestServer -PwithNeoForge`)
   is the load-bearing hard gate: 24/24 required tests. After #10 harness fix,
@@ -32,6 +46,10 @@
   reports for this specific stack shape and add to the list on sight.
 
 ## Lessons
+- 2026-08-20: a non-vacuous hazard-21 gate can drive the real
+  `sendBlockUpdated` mixin seam from an owned worker bucket, but must separately
+  prove two-region fan-out, Brain serial-tail engagement, callback completion,
+  and server-thread drain. Keep issue open until compile + full GameTest pass.
 - 2026-08-19: crew scaffold created; prefer durable notes here over chat history.
 - 2026-08-19: verified GH issues #3-#7 (RFC-0006 hazards 21-25) against code +
   a fresh 24/24 gametest suite run (x2) + 118/118 engine unit tests. All 5

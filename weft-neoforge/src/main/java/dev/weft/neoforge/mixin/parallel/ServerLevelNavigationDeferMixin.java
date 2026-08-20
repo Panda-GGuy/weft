@@ -85,7 +85,7 @@ public abstract class ServerLevelNavigationDeferMixin {
                                       int flags, CallbackInfo ci) {
         if (ParallelAccess.isRegionWorker()) {
             ServerLevel self = (ServerLevel) (Object) this;
-            RegionizedTicking.deferToSectionEnd(
+            RegionizedTicking.deferNavigationUpdate(self,
                     () -> self.sendBlockUpdated(pos, oldState, newState, flags));
             ci.cancel();
         }
