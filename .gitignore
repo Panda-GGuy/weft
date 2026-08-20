@@ -8,4 +8,7 @@ runs/
 *.iml
 .vscode/
 .DS_Store
-gametest-run*.log
+
+# Local GameTest and lab-server harness output.
+gametest-*.log
+labserver-*.log
