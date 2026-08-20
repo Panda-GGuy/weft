@@ -4,7 +4,8 @@
 - Prior code SHA: `1bf784cc40ceb802463198ee09c76bf98c4de5c4`
 - Durable lesson SHA: `458f72144052e806c4724e5d55e2bff898278f85`
 - Relaunch checkpoint SHA: `e694757d753c0366b772434470177314e5c1d04f`
-- Push: `origin/crew/neoforge-inc7` matches `e694757`.
+- Final report SHA: `5ffb8446a8337974b07fe0c65da94d69ff30b289`
+- Push: `origin/crew/neoforge-inc7` matches `5ffb844`.
 
 ## Commands run
 
