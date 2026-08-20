@@ -3,11 +3,13 @@
 ## Standing notes
 - Increment 7 loader wiring lives on `crew/neoforge-inc7`: `singleJoinTick` (default OFF) captures entity work at the ServerLevel seam, captures/owns BE ticker and NeoForge fresh-BE additions per region through `PendingUnits`, then runs `[OwnerMail.drainInto -> entity -> fresh/onLoad + BE]` with `WeftScheduler.runOwnedFused`. Serial mode stays canonical; parallel mode joins once per level tick.
 - Single-join drains RFC-0006 `sectionEndTasks` once after fused join. Block-entity sharding is disabled whenever fused region fan-out is parallel, avoiding hazard-23 nested submits; serial one-region fusion may still shard.
+- Fused hazard-24/25 handling cannot use old post-join serial tails: an entity can register a same-tick BE. Any unsafe entity/BE makes that tick's full fused set run serially in owner order. Fused unmapped units fail loud.
+- Fresh `onLoad` work also makes that fused tick serial; ticker/fresh additions on server thread between sections enter persistent per-region containers for next BE stage. Disable fusion before flushing retained units back to vanilla, or the flush recaptures itself.
 - Status exposes fused tick/region-task counters. `p2fuse` two-island GameTest exists and passed in full suite before an unrelated later `parallelregionsentitysection` test crashed with pre-existing `Entity is already tracked!`.
 
 ## Open threads
 - Full GameTest suite remains red after `p2fuse` passes: optional `parallelregionsentitysection` crashes in `ChunkMap.addEntity` with `Entity is already tracked!` during pending-load processing. Not caused inside fused task stack; needs separate test-isolation/tracker audit.
-- Re-run `p2fuse` after final cross-owner/tail hardening when selective batch invocation is available; full build is green.
+- Selective batch invocation is not exposed by current Gradle run config. Final full-suite rerun after hardening reached the same earlier optional tracker crash before suite completion; full build is green.
 
 ## Lessons
 - 2026-08-19: crew scaffold created; prefer durable notes here over chat history.

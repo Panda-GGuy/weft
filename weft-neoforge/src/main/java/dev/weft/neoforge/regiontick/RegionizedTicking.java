@@ -148,12 +148,13 @@ public final class RegionizedTicking {
     private static FusedLevelUnits fusedCaptureUnits;
     private static java.util.HashMap<Long, Region> fusedCaptureRegions;
     private static ServerLevel fusedCaptureLevel;
+    private static FusedFrame fusedCaptureFrame;
 
     private static final class FusedFrame {
         final TreeMap<Long, List<Entity>> entities = new TreeMap<>();
         final java.util.HashMap<Long, Region> regions = new java.util.HashMap<>();
-        final List<Entity> tail = new ArrayList<>();
         final Consumer<Entity> ticker;
+        boolean forceSerial;
 
         FusedFrame(Consumer<Entity> ticker) {
             this.ticker = ticker;
@@ -392,12 +393,7 @@ public final class RegionizedTicking {
         return mailRouted;
     }
 
-    /**
-     * Whether the single-join fused tick seam is armed (increment 7,
-     * RFC-0007 sec. 4). SCAFFOLDING: no tick-path behavior is keyed on this
-     * yet - it exists so the flag chain, its resolution and its status line
-     * ship (and are testable) ahead of the fused execution path.
-     */
+    /** Whether the single-join fused tick seam is armed (increment 7, RFC-0007 sec. 4). */
     public static boolean isSingleJoin() {
         return singleJoin;
     }
@@ -543,10 +539,20 @@ public final class RegionizedTicking {
 
     private static void updateSingleJoin(boolean value) {
         boolean was = singleJoin;
-        singleJoin = value;
-        if (was && !value) {
-            flushFusedUnitsToVanilla();
+        if (!was && value) {
+            // Activation may follow chunk loads that already populated
+            // vanilla's global lists. First fused BE collection adopts them.
+            singleJoin = true;
+            return;
         }
+        if (was && !value) {
+            // Disable interception before restoring retained units to vanilla.
+            // Otherwise our own add* calls are captured back into fusedUnits.
+            singleJoin = false;
+            flushFusedUnitsToVanilla();
+            return;
+        }
+        singleJoin = value;
     }
 
     private static void flushFusedUnitsToVanilla() {
@@ -586,31 +592,27 @@ public final class RegionizedTicking {
         RegionManager topology = RegionTopology.managerFor(level);
         FusedFrame frame = new FusedFrame(ticker);
         readyCache = parallel ? new java.util.HashMap<>() : null;
-        int[] unmapped = new int[1];
         engine.runOwnedSerial(ownerId(level), () -> original.accept(list, entity -> {
             ChunkPos chunk = entity.chunkPosition();
             Region region = topology.regionAt(chunk.x, chunk.z);
             if (region == null) {
-                unmapped[0]++;
-                frame.tail.add(entity);
-                return;
+                throw new IllegalStateException("singleJoinTick entity has no topology owner at "
+                        + entity.blockPosition());
             }
             if (parallel && (MemoryReachEntities.isMemoryReach(entity)
                     || !readNeighbourhoodLive(level, chunk.x, chunk.z))) {
                 unreadyUnits.increment();
-                frame.tail.add(entity);
-                return;
+                // Fusion cannot move this entity to a post-join tail: an entity
+                // may register a BE that must tick in this tick's BE stage.
+                // Keep it in owner order and conservatively run the whole fused
+                // set on the server thread for this tick.
+                frame.forceSerial = true;
             }
             long regionId = region.id();
             frame.entities.computeIfAbsent(regionId, ignored -> new ArrayList<>()).add(entity);
-            if (region != null) {
-                frame.regions.putIfAbsent(regionId, region);
-            }
+            frame.regions.putIfAbsent(regionId, region);
         }));
         readyCache = null;
-        if (unmapped[0] > 0) {
-            unmappedUnits.add(unmapped[0]);
-        }
         fusedFrames.put(level, frame);
     }
 
@@ -741,6 +743,7 @@ public final class RegionizedTicking {
         fusedCaptureUnits = levelUnits;
         fusedCaptureRegions = frame.regions;
         fusedCaptureLevel = level;
+        fusedCaptureFrame = frame;
         readyCache = parallel ? new java.util.HashMap<>() : null;
         fusedPhase.set(FusedPhase.CAPTURE);
         try {
@@ -750,6 +753,7 @@ public final class RegionizedTicking {
             fusedCaptureUnits = null;
             fusedCaptureRegions = null;
             fusedCaptureLevel = null;
+            fusedCaptureFrame = null;
             readyCache = null;
         }
 
@@ -765,7 +769,11 @@ public final class RegionizedTicking {
             levelUnits.region(regionId);
         }
 
-        boolean runParallel = parallel;
+        // NeoForge onLoad may mutate level-wide structures and register
+        // tickers. Keep ticks containing fresh work on server thread; steady
+        // state remains one parallel task per region.
+        boolean hasFresh = byRegion.values().stream().anyMatch(value -> !value.fresh.isEmpty());
+        boolean runParallel = parallel && !frame.forceSerial && !hasFresh && byRegion.size() >= 2;
         // Hazard 23: a fused outer task owns all stages. Never submit shard
         // work from that worker; only serial fusion may use the shard path.
         boolean shardThisTick = sharded && !runParallel && byRegion.size() == 1;
@@ -828,10 +836,6 @@ public final class RegionizedTicking {
                     })));
         }
         engine.runOwnedFused(tasks, runParallel);
-
-        if (!frame.tail.isEmpty()) {
-            engine.runOwnedSerial(ownerId(level), () -> frame.tail.forEach(frame.ticker));
-        }
 
         drainSectionEndTasks();
         fusedTicks.increment();
@@ -973,6 +977,12 @@ public final class RegionizedTicking {
         } else if (units != null && levelUnits != null
                 && (phase == FusedPhase.ENTITY || phase == FusedPhase.TICK)) {
             levelUnits.addTicker(region.id(), captured);
+        } else if (phase == FusedPhase.NONE && level.getServer().isSameThread()) {
+            // Chunk load may register tickers between level ticks. Vanilla puts
+            // them straight in its live list; retaining them here makes them
+            // live for this region's next BE stage.
+            fusedUnits.computeIfAbsent(level, ignored -> new FusedLevelUnits())
+                    .addTicker(region.id(), captured);
         } else {
             throw new IllegalStateException("singleJoinTick ticker add outside owner stage at "
                     + ticker.getPos());
@@ -997,6 +1007,15 @@ public final class RegionizedTicking {
         if (parallel && !readNeighbourhoodLive(level,
                 ticker.getPos().getX() >> 4, ticker.getPos().getZ() >> 4)) {
             unreadyUnits.increment();
+            // Same rule as unsafe entities: a post-join BE tail would break
+            // entity-before-BE ordering. Stand down fan-out for this tick.
+            // Collection is server-thread-only, so the frame is stable here.
+            FusedFrame frame = fusedCaptureFrame;
+            if (frame == null) {
+                throw new IllegalStateException(
+                        "singleJoinTick BE capture has no fused entity frame");
+            }
+            frame.forceSerial = true;
         }
         fusedCaptureRegions.putIfAbsent(region.id(), region);
         fusedCaptureUnits.addTicker(region.id(), makeBeTickUnit(level, ticker, unit));
@@ -1028,6 +1047,11 @@ public final class RegionizedTicking {
                 fusedCaptureUnits.region(region.id()).fresh.add(blockEntity);
             } else if (units != null && levelUnits != null && phase != FusedPhase.NONE) {
                 levelUnits.region(region.id()).fresh.add(blockEntity);
+            } else if (phase == FusedPhase.NONE && level.getServer().isSameThread()) {
+                // NeoForge chunk load may enqueue fresh BEs outside either
+                // section. Preserve vanilla's next-BE-section onLoad timing.
+                fusedUnits.computeIfAbsent(level, ignored -> new FusedLevelUnits())
+                        .region(region.id()).fresh.add(blockEntity);
             } else {
                 throw new IllegalStateException("singleJoinTick fresh BE add outside owner stage at " + pos);
             }
