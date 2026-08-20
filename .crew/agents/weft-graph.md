@@ -3,7 +3,8 @@
 ## Model
 - Mode: **coding** (switch to PLAN when shaping public graph API)
 - Primary: `cc/claude-fable-5` (CODE / Fable 5)
-- Fallback: `cx/gpt-5.6-sol-high` -> `cc/claude-opus-5` -> `cc/claude-sonnet-5`
+- Fallback: `cc/claude-opus-5` -> `cx/gpt-5.6-sol-high` -> `cc/claude-sonnet-5`
+- On Fable rate limit/quota/429/outage: checkpoint dirty state, switch to Opus immediately, resume; never stop waiting for Fable
 - See: .crew/ROUTING.md capability matrix
 
 P3 graph layer and mod-adapter specialist (activate when P3 starts).

@@ -4,6 +4,7 @@
 - Mode: **coding**
 - Primary: `cc/claude-fable-5` (CODE / Fable 5)
 - Fallback: `cc/claude-opus-5` -> `cx/gpt-5.6-sol-high` -> `cx/gpt-5.6-sol-max` -> `xao/grok-4.5`
+- On Fable rate limit/quota/429/outage: checkpoint dirty state, switch to Opus immediately, resume; never stop waiting for Fable
 - Escalate to Opus/Codex max for gnarly concurrency primitives; Grok 4.5 for fast alternate implementation passes
 - See: .crew/ROUTING.md capability matrix
 

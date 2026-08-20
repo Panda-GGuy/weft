@@ -51,6 +51,9 @@
   Moonrise shipping posture and fan-out honesty now precede soak claims.
 - 2026-08-20: when a blocked PR advances, queue memory must cite the reviewed
   head and separate fixed code contracts from still-missing test evidence.
+- 2026-08-20: if an assigned worktree path loses its Git metadata, preserve its
+  scratch files, recover on a fresh linked worktree, and copy only reviewed
+  lead-owned docs; never use the mixed main worktree as a substitute branch.
 
 ## Hard constraints
 

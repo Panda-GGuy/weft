@@ -74,6 +74,7 @@ on **2026-08-20** (second pass: capability-based pins, not brand habit).
 | **weft-compat** | Policy / tiers / neighbors | `PLAN` `cc/claude-sonnet-5` | `DS_PRO` -> `CODE` (when editing sandbox code) |
 | **weft-api** | Public API coding | `CODE` `cc/claude-fable-5` | `CODEX` -> `CODE_HEAVY` -> `GROK_CODE` |
 | **weft-release** | CI/YAML/bulk ship mechanics | `DS_FLASH` `ds/deepseek-v4-flash` | `OC_FREE` -> `GROK_COMPOSE` -> `CODEX_FAST` |
+| **weft-watchdog** | Stall/crash monitor + bounded restart | `CODEX` `cx/gpt-5.6-sol-high` | `CODE_HEAVY` -> `GROK_CODE` -> `OC_CODE` |
 | **weft-audit** | Hazard reasoning (on-demand) | `GROK_REASON` `xao/grok-4.20-0309-reasoning` | `DS_PRO` -> `PLAN` -> `CODE_HEAVY` |
 | **weft-graph** | P3 graph/adapters coding | `CODE` `cc/claude-fable-5` | `CODEX` -> `CODE_HEAVY` -> `PLAN` (API shape) |
 
@@ -83,6 +84,15 @@ If one agent both **plans** and **codes** in the same session:
 1. Start on the **Primary** pin for the dominant mode of the current step.
 2. For parity/architect/lead: switch to `CODE` / `CODE_HEAVY` only when producing patches.
 3. Never keep ship/default-ON approval on `DS_FLASH` / `OC_*` / `HAIKU` alone.
+
+### Mandatory limit/outage failover
+
+1. Treat rate limits, quota exhaustion, HTTP 429, unavailable-model errors, and provider outages as route failures—not task failures.
+2. Before switching, write current branch/commit, dirty files, completed checks, next command, and blocker to `.crew/memory/_session/STATUS.md` or agent report.
+3. Any agent on `cc/claude-fable-5` switches first to `cc/claude-opus-5`, then walks its remaining fallback list. Never stop merely because Fable 5 limits were hit.
+4. Planning agents walk their own fallback list; correctness/default-ON decisions still require a non-cheap reviewer.
+5. Launcher/orchestrator must relaunch a stopped process on next fallback using same worktree and prompt. Never reset or clean dirty state during failover.
+6. Record selected fallback in session status so next context knows route changed.
 
 ## Combos (created in OmniRoute 2026-08-20)
 

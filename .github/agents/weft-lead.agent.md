@@ -2,7 +2,7 @@
 description: "Orchestrate Weft increments, handoffs, roadmap. Use when starting work, planning P2/P3, or coordinating agents."
 name: "weft-lead"
 tools: [read, search, edit, execute, agent, todo, web]
-agents: [weft-architect, weft-engine, weft-neoforge, weft-parity, weft-perf, weft-compat, weft-api, weft-release, weft-audit, weft-graph]
+agents: [weft-architect, weft-engine, weft-neoforge, weft-parity, weft-perf, weft-compat, weft-api, weft-release, weft-watchdog, weft-audit, weft-graph]
 ---
 # weft-lead
 
