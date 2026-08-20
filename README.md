@@ -61,8 +61,9 @@ Full build including the NeoForge mod (needs maven.neoforged.net):
 
 ## Status
 
-Pre-alpha. **P0 and P1 are complete; P2 is open** (regionized vanilla
-ticking + legacy lane, behind a flag — parity suite first, see below). What
+Pre-alpha. **P0 and P1 are complete; P2 is open** (regionized/partitioned
+ticking, parallel regions, owner mail, legacy lane, and block-entity sharding
+remain behind default-OFF flags — parity suite first, see below). What
 ships today: the engine core with a passing concurrency test suite, the
 **P0 profiler** (install on any stock server *or single-player world* and it
 measures how much of your pack's tick Weft could parallelize), and the
@@ -262,9 +263,10 @@ new `p2parallel` hard gametest proves the E1 claim concrete — two islands,
 (thread-name probe), per-island end states **bit-identical** to the inline
 control. Honest scoping: barriered fan-out means async-service mail keeps
 applying at INGEST (with the main thread parked, global-inbox delivery *is*
-owner delivery); free-running regions with true mailbox rerouting, WS-10
-compounding inside big regions, and the long-tail soak (Create/AE2, chaos,
-R7 under the flag) are what stand between this and default-ON.
+owner delivery). Owner-mail routing and block-entity sharding have since
+landed behind default-OFF flags and their contract gates (RFC-0007 §3 and
+RFC-0008); the single-join region tick and long-tail soak (Create/AE2, chaos,
+R7 under the flags) still stand between this stack and default-ON.
 
 **RFC-0002/0003 workstreams started** (2026-08-16): every Weft optimization
 module now walks the [RFC-0003](docs/RFC-0003-coexistence-policy.md)

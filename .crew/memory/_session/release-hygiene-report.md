@@ -24,6 +24,13 @@ README flag claims match `WeftConfig` defaults checked here:
 
 No defaults changed.
 
+README's P2 headline and increment-5 remaining-work text omitted implemented
+owner-mail routing and block-entity sharding. Both now appear as default-OFF,
+contract-gated increments; single-join and soak work remain open. Release
+workflow copy also drifted: it still called P1 services shadow-only and claimed
+no simulation rerouting. It now says P1 is authoritative and P2 ownership stays
+default-off.
+
 ## Verification
 
 - `git check-ignore -v --no-index gametest-foo.log gametest-run123.log labserver-foo.log` resolves all three through root `.gitignore`.
@@ -38,3 +45,7 @@ NOT READY. P2 parallel/ownership features still ship OFF pending stated parity, 
 
 - Run/confirm current seven-cell neighbor matrix under CI; README only preserves dated proof for the original four-cell dispatch.
 - Keep README neighbor count synchronized when cells change, or replace exact count with generated/current evidence.
+- Reconcile P2 increment numbering: RFC-0007 calls single-join increment 7,
+  while `WeftConfig` and RFC-0008 call block-entity sharding increment 7.
+- Refresh RFC-0007's DRAFT/in-progress owner-mail status after numbering is
+  settled; code and gate text describe increment 6 as implemented and green.
