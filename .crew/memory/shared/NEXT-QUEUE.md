@@ -5,18 +5,17 @@ Last updated: 2026-08-20 (PR #13/#14/#15 + field reconciliation)
 Pick highest READY packet for role. Preserve dirty worktrees. Do not default
 enable any ownership/parallel flag.
 
-## Merge order
+## Merge order (updated 2026-08-20 late)
 
-1. Publish this focused lead-doc reconciliation; use it instead of stale shared
-   copies carried by #13/#14/#15.
-2. Rebase #15 onto `origin/main` `d1095cc`; keep parity code/report/NOTES, drop
-   superseded shared `BACKLOG`/`PROJECT`/`NEXT-QUEUE`; make ready after diff and
-   full-suite evidence review.
-3. Close #13 as superseded once replacement lead docs are reachable from main,
-   or retarget #13 to contain only replacement docs. Do not merge old queue.
-4. Keep #14 draft. Re-review head `1bf784c`, which addresses fused readiness and
-   entity-before-BE ordering; finish deterministic gate evidence, then rebase it
-   after #15 and drop its stale shared queue copies.
+1. DONE: PR #17 merged to main (`1102584`).
+2. DONE: PR #13 closed as superseded by #17.
+3. DONE: PR #15 rebased onto current main; keep draft until full-suite evidence
+   and review of current head. Drop any remaining stale shared queue blobs.
+4. Keep #14 draft. Re-review current head after #15 lands; require non-vacuous
+   fused/fallback gates and full GameTest isolation of tracker crash.
+5. Cleanup DONE for merged remotes: deleted `crew/lead-plan`, `crew/engine-inc7`,
+   `feat/p2-parallel-regions-throughput`, `feat/ws7-observability-exporter`,
+   `crew/sync-queue-main`. Keep only open-PR branches + active release hygiene.
 
 ## Parity handoff — READY
 
