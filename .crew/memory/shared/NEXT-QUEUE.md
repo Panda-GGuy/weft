@@ -1,94 +1,94 @@
 # Next queue (lead-owned)
 
-Last updated: 2026-08-20 (catch-up relaunch)
+Last updated: 2026-08-20 (PR #13/#14/#15 + field reconciliation)
 
-How to use: when an agent finishes its current packet, pick the **highest
-priority READY** item for its role. Do not start BLOCKED items. Do not flip
-any ownership/parallel flag default-ON.
+Pick highest READY packet for role. Preserve dirty worktrees. Do not default
+enable any ownership/parallel flag.
 
-## NOW (in flight)
+## Merge order
 
-| ID | Owner | Work | Exit |
-|---|---|---|---|
-| NOW-7c | weft-neoforge | Wire fused single-join path behind `singleJoinTick` OFF (PendingUnits + runOwnedFused already on main) | Flag OFF bit-identical; ON serial-equivalent path; counters/status; report; push `crew/neoforge-inc7` |
-| NOW-ISSUES | weft-parity | Open issues #10 (new flake), #3/#6 reopened | Honest GH comments; dedicated gates or explicit leave-open; `parity-issues-report.md` |
-| NOW-LEAD | weft-lead | Keep this queue + lead-plan current as NOW items finish | Handoffs match tip; PROJECT/BACKLOG not stale |
+1. Publish this focused lead-doc reconciliation; use it instead of stale shared
+   copies carried by #13/#14/#15.
+2. Rebase #15 onto `origin/main` `d1095cc`; keep parity code/report/NOTES, drop
+   superseded shared `BACKLOG`/`PROJECT`/`NEXT-QUEUE`; make ready after diff and
+   full-suite evidence review.
+3. Close #13 as superseded once replacement lead docs are reachable from main,
+   or retarget #13 to contain only replacement docs. Do not merge old queue.
+4. Keep #14 draft. Rebase it after #15 only after three parity-review blockers
+   are fixed; drop its stale shared queue copies.
 
-## READY immediately after NOW (no waiting on soak)
+## Parity handoff — READY
 
-Priority order:
+Branch/worktree: `crew/parity-close` / `C:\Users\Panda\weft-wt-parity`.
+Worktree is dirty with focused #3 work; never reset or overwrite it.
 
-### Q1 — Land 7c + gate it (depends on NOW-7c green compile/tests)
-- **Owner:** weft-parity (gate) + weft-neoforge (fixups)
-- **Work:** `p2fuse` two-island GameTest (A's BE completes while B's entities still run); `p2parity` still green with flag OFF and ON-vanilla
-- **Pin:** CODE `cc/claude-fable-5` or CODEX `cx/gpt-5.6-sol-high` for test code; PLAN sonnet for pass/fail judgment
-- **Done means:** PR merged or ready; suite green twice; flag still default OFF
+- Finish `p2navdefer`: real fan-out, villager/door navigation trigger, deferred
+  call observed after fused/section join on server thread. Current dirty patch
+  adds counters/probe but needs build and non-vacuous GameTest proof.
+- Build `p2evictionchurn`: boundary BE, live then evicted neighbor, unrelated
+  fan-out engaged, `unreadyUnits > 0`, `unmappedUnits == 0`, server-thread serial
+  tail, zero guard trip.
+- Re-review #14 only after fixups. Required contract:
+  1. failed fused readiness routes BE/fresh work to actual serial tail;
+  2. every entity serial tail completes before any BE stage;
+  3. `p2fuse` deterministically proves cross-region stage overlap, pending-unit
+     behavior, and entity/BE fallback paths.
+- Preserve #15 fixed-ID harness cleanup. Rebase, run full GameTest suite twice,
+  and record exact 24/24 evidence. Green CI compile/build is not soak.
+- Exit: #3/#6 close only with named non-vacuous gates; otherwise remain open.
 
-### Q2 — Hazard gate honesty (#3 / #6 / #10)
-- **Owner:** weft-parity
-- **Work:**
-  - #3: dedicated `p2navdefer`-style gate (villager/door under fan-out) or documented why impossible + leave open
-  - #6: dedicated `p2evictionchurn` (forced load/unload under section) or leave open with that requirement
-  - #10: root-cause or minimal standing repro for `Entity is already tracked!`; do not close on vibes
-- **Pin:** PLAN then CODE for gametests
-- **Done means:** each issue closed **only** with non-vacuous gate, else stays open with named gap
+## Compatibility handoff — READY
 
-### Q3 — Docs / status hygiene (parallel with Q1–Q2)
-- **Owner:** weft-release
-- **Work:** RFC-0006/0007 headers no longer say shipped increments are "in progress"; README/status mention open #3/#6/#10 honestly; no default-ON implication
-- **Pin:** DS_FLASH / cheap
-- **Done means:** status language matches flags + open issues (law 9)
+Branch/worktree: field worktree `C:\Users\Panda\weft` currently contains mixed
+dirty work from several packets. Touch only compat files or move work to a clean
+branch without resetting existing changes.
 
-### Q4 — weft-audit go/no-go on fuse window mitigations (before any 7c default talk)
-- **Owner:** weft-audit
-- **Work:** Independent review of NOTE-0001 GO + list RFC-0006 mitigations that assumed "server parked between sections" and must re-anchor to single join; hazard-23 interaction under fused fan-out
-- **Pin:** GROK_REASON / DS_PRO
-- **Done means:** written go/no-go in `.crew/memory/_session/` + audit NOTES; blocks default-ON discussion only (not scaffolding)
+- Issue #16 is source of truth: Moonrise mid-tick task asserted main-thread
+  execution from Weft worker under `parallelRegions`.
+- Validate neighbor detection uses actual Moonrise mod id(s), then ship tested
+  coexistence posture: profiler cooperate; tick-ownership modules yield or
+  refuse. Ensure posture transitively prevents `parallelRegions` worker path,
+  not only top-level `regionized_ticking` UI state.
+- Add sandbox registry test and a coexistence/launch assertion proving worker
+  fan-out cannot engage when Moonrise is present.
+- Update RFC-0003/neighbor docs and issue #16 with exact evidence. Until merged,
+  lab rule is: no Moonrise + parallel/region ownership soak.
+- Do not absorb unrelated fan-out-status, watchdog, routing, or lab edits from
+  field worktree into compat commit.
 
-## READY after Q1–Q2 (P2 confidence track)
+## Release handoff — READY
 
-### Q5 — Soak matrix under opt-in flags
-- **Owner:** weft-parity + weft-perf (measure) + human/lab scripts
-- **Work:** Create/AE2 pack, chaos kill-save, neighbors ladder, R7 under `parallelRegions` / partitioned / mail as appropriate
-- **Done means:** dated evidence notes; failures filed as issues; still no default-ON without lead+parity
+Branch/worktree: `crew/release-hygiene` / `C:\Users\Panda\weft-wt-release`.
+It has old shared-memory dirt copied from pre-field queue; preserve then drop or
+supersede those copies during rebase—never reset blindly.
 
-### Q6 — Close remaining known gaps
-- **Owner:** weft-compat / weft-neoforge as assigned
-- **Examples:** legacy passenger on vanilla vehicle; modded Brain entities outside MemoryReachEntities.SERIAL fail-loud policy docs
-- **Done means:** issue or NOTES entry with fix or accepted limitation
+- Reconcile PRs in merge order above. Remove duplicated stale shared docs from
+  #15/#14 rather than resolving them by taking old branch versions.
+- Refresh README/RFC status: #10 fixed on #15 but not main; #3/#6/#16 open; #14
+  draft and parity-blocked; all P2 ownership flags default OFF.
+- Document reproducible ON/OFF field protocol: same world recreation, mod list,
+  flags, warm-up/window, Spark URLs, Weft counters, and fan-out evidence. State
+  that current 8.99 vs 10.1 median and 14.3 vs 21.4 p95 sample is promising but
+  not proof of parallel fan-out because `owned parallel=0` was often observed.
+- Confirm current seven-cell neighbor workflow with dated CI evidence. Add
+  Moonrise cell only after compat posture is merged and tested.
+- Run static workflow parse and `git diff --check`; no release/default-ON claim.
+- Exit: release report says NOT READY and lists #3/#6/#16, PR #14 blockers,
+  chaos/R7, real-pack soak, and hazards 19/20 as gates.
 
-### Q7 — Default-ON policy discussion only
-- **Owner:** weft-lead + weft-parity + weft-release
-- **Blocked on:** Q1–Q6 evidence, hazards 19/20 exit criteria, soak green
-- **Done means:** written decision; flags flipped only with parity signoff
+## Blocked follow-ons
 
-## LATER (do not start until P2 confidence)
-
-### Q8 — Entity sharding research path (RFC-0008) — deferred
-- pushEntities hazard; combination gates before any nested submission
-
-### Q9 — P3 graph adapter spike
-- Activate **weft-graph**; first consumer + one adapter (Create/AE2/energy)
-
-### Q10 — Production default policy
-- Dedicated vs integrated server; ship checklist with weft-release
-
-## Idle agent cheat-sheet
-
-| If you are… | and NOW is done | start |
-|---|---|---|
-| weft-neoforge | 7c landed | Q1 followups / help parity gates needing mixins |
-| weft-parity | issues packet done | Q1 p2fuse review + Q2 remaining gates |
-| weft-engine | idle | Support Q1 pure-side test gaps; no MC imports |
-| weft-audit | called | Q4 |
-| weft-release | idle | Q3 |
-| weft-compat | idle | Q6 gap list |
-| weft-perf | idle | Q5 measurement plan only (no default-ON claims) |
-| weft-graph | idle | wait for Q9 |
-| weft-lead | always | refresh this file + handoffs when NOW completes |
+- #14 merge: blocked on parity review items above and #15 rebase order.
+- Real-pack soak: blocked on #16 shipping posture. Run without Moonrise only if
+  evidence is explicitly scoped to that pack.
+- Default-ON discussion: blocked on all parity/compat/release exits, soak,
+  chaos/R7, and hazards 19/20 review.
+- P3 graph work: wait until P2 confidence track clears.
 
 ## Hard rules
-1. Correctness over speed; unknown mods legacy.
-2. No default-ON without parity + soak evidence.
-3. Green unit/gametest ≠ soak.
-4. Portable notes under `.crew/memory/**`; session scratch stays gitignored.
+
+1. Correctness over speed; unknown mods stay serialized.
+2. Flags stay default OFF.
+3. Green builds/GameTests are regression evidence, not soak.
+4. On provider 429/quota/outage, checkpoint branch, commit, dirty files, checks,
+   next command, and blocker; then follow `.crew/ROUTING.md` fallbacks.
