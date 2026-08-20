@@ -49,6 +49,9 @@
 - 2026-08-20 fair equal-heap worldgen ON/OFF was tied (MSPT ~39 vs ~40). Do not
   treat worldgen Stressmark as fan-out/default-ON evidence. Keep #3/#6 open until
   dedicated gates prove real multi-bucket fan-out; keep singleJoinTick OFF.
+- 2026-08-20: hazard-21 `p2navdefer` completed `compileGametestJava` and the full
+  25/25 required GameTest suite. This makes #3 reviewable; it does not supply
+  #6 evidence or justify default-ON.
 - 2026-08-20: a non-vacuous hazard-21 gate can drive the real
   `sendBlockUpdated` mixin seam from an owned worker bucket, but must separately
   prove two-region fan-out, Brain serial-tail engagement, callback completion,
