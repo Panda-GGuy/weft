@@ -16,6 +16,7 @@ worlds that change shape while sections run.**
 | `soak.py` | The live soak. Not a benchmark — its output is *did anything trip*. Builds a world with every property the gametest rigs individually lack (see TESTING-0001 §2.3's table) and churns it. Fails fast on nonzero `unmapped units` or `domain trips`. |
 | `eviction-repro.py` | Narrow repro for RFC-0006 hazard 24: a block entity on a chunk boundary whose one-block neighbour read crosses into an evicted chunk. A template for "reproduce the crash before fixing it". |
 | `hang-triage.sh` | Is it hung or dead? They look identical to a player and lead to opposite investigations, and a hang leaves no crash report. Answers in ten seconds, then dumps twice. |
+| [`STRESSMARK.md`](STRESSMARK.md) | Exact fresh-world, pinned-seed Stressmark A/B protocol. It fixes pack, seed, flags, bot load, duration, evidence, and pass criteria while keeping the result separate from soak and default-ON clearance. |
 
 Prerequisites: the dev server with rcon (`weft-neoforge/run/server/server.properties`
 already has it), and `metricsEnabled = true` in `weft-common.toml` for anything
