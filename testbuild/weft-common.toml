@@ -1,0 +1,120 @@
+# Weft multithreading preview — drop-in config
+#
+# Copy this file to your server's (or single-player instance's)
+# `config/weft-common.toml`, replacing what is there. Weft fills in every key
+# this file omits with its shipping default on first boot, so a short file
+# stays correct as the config grows — you only ever need to keep the lines you
+# actually want to differ.
+#
+# ===========================================================================
+# What this buys you, and what it costs
+# ===========================================================================
+#
+# Region parallelism measured 3.33-3.90x on the entity section and 2.43-2.76x
+# on full-tick MSPT, across seven runs on an 8-region / 1760-mob world, with a
+# one-region negative control at 0.98-1.04x. Method and controls:
+# docs/TESTBUILD-0001-multithreading-preview.md.
+#
+# It is ON below. It was NOT on in the first cut of this file, because the
+# first live-server soak crashed it twice in five minutes. Both crashes are now
+# root-caused and fixed:
+#
+#   RFC-0006 hazard 21  a villager opening a door raced the level-wide
+#                       navigatingMobs set, and the loop also wrote to other
+#                       regions' mobs mid-tick. Fixed by deferring to the
+#                       section barrier.  (github issue #3)
+#   RFC-0006 hazard 22  worker chunk reads waited on a promotion future that
+#                       only the parked main thread can complete, so every
+#                       border-ring read failed for as long as a parallel
+#                       section ran. Deterministic, not racy. Fixed by reading
+#                       the generated-FULL view vanilla already guarantees.
+#                                                          (github issue #4)
+#
+# This is still a PREVIEW of an open workstream. P2's exit criteria - full
+# parity suite, chaos, R7, the Create/AE2 soak, and hazards 19/20 - are not all
+# green, which is why the shipping default stays OFF and you are opting in.
+# Use a world you have backed up.
+#
+# HOW MUCH IT BUYS YOU DEPENDS ON YOUR WORLD, NOT YOUR CPU. parallelRegions
+# parallelises ACROSS regions, and a region is a cluster of ticking chunks
+# (clusters within mergeDistance = 8 chunks merge into one). So:
+#   - several players spread out, or spread-out chunk-loaded farms -> many
+#     regions -> this is where the 2.4-2.8x lives.
+#   - one player, no chunk loaders -> ONE region -> parallelRegions is
+#     architecturally inert, and the ~1.0x control above is the measurement of
+#     exactly that. No amount of CPU changes it; blockEntitySharding is your
+#     only lever, and it is a tail-latency win.
+#
+# Run `/weft status` for your live region count and the guard counters, and
+# `/weft report` for where your tick actually goes.
+
+mergeDistance = 8
+# Threads reserved for IO / netty / GC. The worker pool is
+# availableProcessors - reservedThreads. Raise it if you run other services
+# on the same box.
+reservedThreads = 2
+
+# Leave the profiler on for a preview build: `/weft report` is how you find out
+# whether your pack is even shaped to benefit. It costs two clock reads per
+# ticked object; turn it off with `/weft profile off` once you are done looking.
+profilingEnabled = true
+
+# --- P2: the multithreading stack -------------------------------------------
+# Prerequisites. Both are serial: they route ticking through the engine and
+# group it by region, on the server thread. No threads yet, no speedup, and
+# they are the seam everything else plugs into.
+regionizedTicking = true
+partitionedTicking = true
+
+# THE LEVER. Runs those per-region buckets concurrently on engine workers,
+# barriered inside each vanilla tick section, so macro-order is unchanged.
+# Single-bucket sections (solo play: one region) take the serial path, so there
+# is no new overhead where there is nothing to parallelise.
+parallelRegions = true
+
+# Goes with parallelRegions: async results are delivered to the owning region's
+# own mailbox, drained by that region's bucket at the head of its section.
+# Verified in the live soak - 22000 routed, 22000 drained, 0 inline fallback.
+ownerMailRouting = true
+
+# Documented behaviour change (RFC-0004 sec. 2.5): block entities in ADJACENT
+# chunks tick in different colour passes, so a hopper chain crossing a chunk
+# border can move an item on a different tick than vanilla. Totals are
+# conserved and the result is reproducible; vanilla's exact ordering is not
+# preserved. If you run tick-perfect contraptions, set this to false and keep
+# the rest.
+# NOTE: this now stands itself down automatically on any level that is fanning
+# out across 2+ regions (RFC-0006 hazard 23 - the two together deadlocked, and
+# sharding was only ever the answer for the single-region case). So on a
+# multi-region world this flag is inert by design, and on a solo one-region
+# world it is your only lever. Leaving it on is correct in both cases.
+blockEntitySharding = true
+blockEntityShardMinUnits = 64
+
+# Still OFF, and not an oversight: RFC-0008 sec. 1 found that LivingEntity's
+# aiStep calls pushEntities every tick, which writes motion directly to every
+# colliding neighbour. Round-robin entity sharding races two mobs standing next
+# to each other. Do not turn this on.
+entitySharding = false
+
+# The Tier-2 legacy lane is off in this preview: it changes WHEN unverified
+# mods' tick work runs, and the preview's job is to isolate the multithreading
+# win, not to bundle it with a second variable.
+legacyLane = false
+
+# --- P1 services (unchanged from the shipping defaults) ---------------------
+asyncPathfinding = true
+spawnDensityMode = "AUTHORITATIVE"
+
+# WS-1 mob-AI activation throttling. A real win on mob-heavy packs, but it is
+# NOT multithreading — it makes distant mobs think less often, a visible
+# behaviour change. Left off so this preview measures one thing. Turn it on
+# separately, afterwards, if you want it.
+activationScheduling = false
+
+# --- WS-7 observability (RFC-0009) ------------------------------------------
+# Off by default. If you want to watch per-region tick durations while you
+# play, set metricsEnabled = true and scrape http://127.0.0.1:9940/metrics;
+# regionTimingEnabled adds the per-region timing probe.
+metricsEnabled = false
+regionTimingEnabled = true

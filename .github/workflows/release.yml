@@ -33,6 +33,6 @@ jobs:
 
             Drop `weft-neoforge-*.jar` into your `mods/` folder — works in
             single player (integrated server) and on dedicated servers.
-            This phase is the P0 profiler + P1 shadow services: it measures
-            your pack (`/weft report`, `/weft services`) and does not yet
-            reroute simulation. See the README and RFC-0001 for the roadmap.
+            This phase includes the P0 profiler and P1 authoritative services.
+            P2 tick-ownership features remain default-off. See the README and
+            RFC-0001 for current flags, evidence, and roadmap.

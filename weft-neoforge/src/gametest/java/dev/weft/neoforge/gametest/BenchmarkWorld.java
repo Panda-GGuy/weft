@@ -112,6 +112,27 @@ public final class BenchmarkWorld {
         return out;
     }
 
+    /**
+     * A fixed-seed hostile cluster for the region-parallelism benchmark
+     * (RFC-0006 throughput gate): persistence-required hostiles packed inside
+     * {@code radius} blocks of {@code origin}, with no player anywhere near,
+     * so every one of them pays a full AI tick every tick and none of them
+     * acquires a target (targeting changes goal cost and would blur an A/B).
+     *
+     * <p>Hostiles rather than the passive field because the claim under test
+     * is about the <em>entity section</em>, and mob AI is what makes that
+     * section expensive in a real pack — {@code aiStep} sits at the top of
+     * every profile the P0 report has produced. {@code salt} gives each
+     * island its own layout while keeping the whole rig reproducible.
+     */
+    public static List<Mob> spawnHostileCluster(ServerLevel level, BlockPos origin,
+                                                int count, int radius, long salt) {
+        SplittableRandom rng = new SplittableRandom(POPULATION_SEED ^ salt);
+        List<Mob> out = new ArrayList<>(count);
+        spawnBand(level, origin, rng, HOSTILE_TYPES, count, 2, radius, true, out);
+        return out;
+    }
+
     private static void spawnBand(ServerLevel level, BlockPos origin, SplittableRandom rng,
                                   List<EntityType<? extends Mob>> types, int count,
                                   int minRadius, int maxRadius, boolean persistent, List<Mob> out) {
