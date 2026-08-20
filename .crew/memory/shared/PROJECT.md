@@ -1,33 +1,74 @@
 # Shared project memory
 
-Last updated: 2026-08-20
+Last updated: 2026-08-20 (lead reconciliation against `origin/main` `d1095cc`)
 
 ## What Weft is
-Multithreaded server engine for modded Minecraft (NeoForge 1.21.1). Regionized ticking + graph layer + legacy lane for unknown mods.
+
+Multithreaded server engine for modded Minecraft (NeoForge 1.21.1). Regionized
+ticking + graph layer + legacy lane for unknown mods.
 
 ## Phase status
-- P0 complete (profiler)
-- P1 complete (off-thread services; async pathfinding + spawn density defaults ON)
-- P2 open: many increments exist behind flags (regionized, legacy, partitioned, parallel, owner mail, BE sharding)
-- P3+ not started (graph adapters, race detector, production tag)
 
-## Default posture
-Parallel/ownership features default OFF until soak + parity say otherwise.
+- P0 complete (profiler).
+- P1 complete (off-thread services; async pathfinding + spawn density defaults ON).
+- P2 open. Regionized/partitioned/parallel/owner-mail/BE-shard remain behind
+  default-OFF flags.
+- Increment 6 owner-mail routing and increment 7 engine scaffold are on main.
+- Increment 7 loader fuse wiring is draft PR #14. Head `1bf784c` now routes
+  failed fused readiness through serial owner order and preserves
+  entity-before-BE ordering. CI is green, but parity re-review and deterministic
+  `p2fuse` overlap/pending/fallback evidence remain required; its full GameTest
+  runs still hit the known optional entity-tracker crash before suite completion.
+- P3+ not started (graph adapters, race detector, production tag).
 
-## Next likely work (lead may reorder)
-1. Finish free-running / single-join path (RFC-0007 inc 7) if still open in tree
-2. Soak matrix under parallel flags (Create/AE2, chaos, neighbors)
-3. Close known gaps (e.g. legacy passenger on vanilla vehicle)
-4. Only then discuss default-ON
-5. P3 graph adapter spike after P2 confidence (activate weft-graph)
+## Current field evidence
 
-## OmniRoute (verified 2026-08-20)
-- Active: claude, codex, xai-oauth, grok-cli, opencode, deepseek
-- Model prefixes: cc/, cx/, xao/, gc/, oc/, ds/
-- OpenCode free: connected (`oc/big-pickle`, etc.)
-- Combos: none created yet (see .crew/ROUTING.md for weft/* combo recipes)
-- Pin philosophy: Sonnet=plan, Fable/Opus/Codex=code, Grok4.5=fast code, Grok-reason/DS-Pro=audit, DS-Flash/OC=cheap
-- Pins live in .crew/ROUTING.md
+- 2026-08-20 SP Create/AE2 stress: opt-in run had better measured latency tails,
+  but `owned parallel=0` was often observed. Do not attribute result solely to
+  multi-region fan-out.
+- Moonrise + `parallelRegions` crashed when Moonrise asserted a main-thread
+  chunk task from a Weft worker. Issue #16 is open. Shipping coexistence posture
+  must yield/refuse tick ownership until tested; never co-enable for soak.
+- Durable source: `shared/FIELD-2026-08-20.md`.
+
+## Pull request disposition
+
+- #13 queue/project docs: superseded by this post-field reconciliation. Do not
+  merge stale queue text; replace from lead docs or close as superseded.
+- #14 fused loader path: keep draft and default OFF. Re-review the `1bf784c`
+  ordering/readiness fix, add deterministic gates, rebase after #15, then rerun
+  the full suite twice.
+- #15 parity harness/accessor cleanup: first merge candidate. CI is green and
+  report records two 24/24 suites. Rebase onto `d1095cc`, preserve focused code
+  and parity notes, and drop stale shared queue copies superseded here.
+
+## Open issues
+
+- #16 Moonrise + parallel worker crash: open; compat shipping gate.
+- #3 hazard 21: open pending non-vacuous `p2navdefer` evidence. Focused dirty
+  work exists in parity worktree; do not overwrite it.
+- #6 hazard 24: open pending non-vacuous `p2evictionchurn` evidence; PR #14's
+  code fix does not close the issue without that gate.
+- #10 closed by PR #15 harness fix, but change is not on main yet.
+- #4/#5/#7 closed.
+
+## Release posture
+
+NOT READY. No P2 ownership/parallel flag may default ON. Required before any
+default discussion: #16 shipping posture, #3/#6 gates, corrected PR #14 fusion
+contract, current neighbor/chaos/R7 evidence, real-pack soak, and hazards 19/20
+re-audit.
+
+## Next work
+
+See `shared/NEXT-QUEUE.md` for actionable parity/release/compat handoffs.
+
+## OmniRoute
+
+Pins and provider fallbacks live in `.crew/ROUTING.md`. On provider limits,
+checkpoint branch, dirty files, checks, next command, and blocker before walking
+fallbacks; never reset a dirty worktree.
 
 ## Hard constraints
-See .crew/laws.md
+
+See `.crew/laws.md`.
