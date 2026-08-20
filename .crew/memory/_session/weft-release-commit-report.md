@@ -49,8 +49,8 @@ Push: `origin/crew/release-hygiene` updated successfully
 
 ## Next owner
 
-- `weft-lead`: open/reconcile release-hygiene PR; branch is 16 commits ahead
-  and 3 behind `origin/main`, with conflicts in shared memory/report files.
+- `weft-lead`: open/reconcile release-hygiene PR; branch is 16 commits behind
+  and 5 ahead of `origin/main`, with conflicts in shared memory/report files.
 - `weft-release`: fix `metrics-port` harness and RFC/README status drift on a
   current-main branch; avoid folding that code change into this docs branch.
 - `weft-parity`: current-head PR #14 rereview and named gates.
