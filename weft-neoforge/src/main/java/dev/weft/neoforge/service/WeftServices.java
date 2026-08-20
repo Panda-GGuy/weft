@@ -385,6 +385,51 @@ public final class WeftServices implements AutoCloseable {
                              long parityMismatchTicks, long serviceFailures, boolean latchedOff,
                              String lastMismatch) {}
 
+    /**
+     * One level's census state for WS-7 (RFC-0009 Appendix A).
+     *
+     * <p>By mob <em>category</em>, not by entity type: that is what
+     * {@link EntityCensus} tracks, because the mobcap is expressed in
+     * categories. A per-type gauge would mean a full entity walk per scrape,
+     * which is a measurement job in a different workstream.
+     */
+    public record CensusStats(int tracked, long drift, long reconciles,
+                              Map<String, Integer> byCategory) {}
+
+    /**
+     * The last measured duration of each spawn-density stage, in nanoseconds
+     * (WS-7 / RFC-0009 §3).
+     *
+     * <p>Last values, not a histogram, because last values are what the service
+     * retains — {@code captureNanosLast} and friends are overwritten each tick.
+     * A histogram would either need a new accumulation on the capture path or
+     * would silently be a once-a-second <em>sample</em> of a per-tick quantity
+     * dressed up as a distribution. Gauges named for what they are beat a
+     * histogram that is not one.
+     *
+     * @param computeNanos 0 when the async service has published nothing yet
+     */
+    public record ServiceLatency(long captureNanos, long buildNanos, long computeNanos) {}
+
+    /** Server-thread read; the exporter calls this while building its snapshot. */
+    public ServiceLatency serviceLatency(ServerLevel level) {
+        LevelServices s = servicesOf(level);
+        return new ServiceLatency(s.captureNanosLast.get(), s.buildNanosLast.get(),
+                s.spawnDensity.latest().map(p -> p.computeNanos()).orElse(0L));
+    }
+
+    /** Server-thread read; the exporter calls this while building its snapshot. */
+    public CensusStats censusStats(ServerLevel level) {
+        LevelServices s = servicesOf(level);
+        EntityCensus.Counts counts = s.census.snapshot();
+        Map<String, Integer> byCategory = new java.util.LinkedHashMap<>();
+        for (MobCategory category : CATEGORIES) {
+            byCategory.put(category.getName(), counts.global(category.ordinal()));
+        }
+        return new CensusStats(s.census.trackedCount(), s.driftTotal.get(),
+                s.reconciles.get(), byCategory);
+    }
+
     public SpawnStats spawnStats(ServerLevel level) {
         LevelServices s = servicesOf(level);
         return new SpawnStats(s.authoritativeTicks.get(), s.fallbackTicks.get(),

@@ -4,6 +4,7 @@ import dev.weft.engine.mail.Message;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Deque;
 import java.util.HashMap;
@@ -12,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.LongAdder;
 import java.util.function.Consumer;
 
 /**
@@ -29,6 +31,9 @@ import java.util.function.Consumer;
  * </ul>
  */
 public final class RegionManager {
+
+    /** No regions absorbed: the overwhelmingly common chunk load. */
+    private static final long[] EMPTY_IDS = new long[0];
 
     private final int mergeDistance;
     private final long worldSeed;
@@ -59,6 +64,48 @@ public final class RegionManager {
      */
     private Consumer<Message> strandedMailSink = m -> {};
 
+    /**
+     * Observer of topology mutations (WS-7 / RFC-0009 §2). Merges and splits
+     * were happening uncounted; the exporter needs both a rate and the discrete
+     * event. {@code LongAdder} rather than a plain counter because mutation is
+     * server-thread-only while the scrape reads from its own thread.
+     */
+    private final LongAdder merges = new LongAdder();
+    private final LongAdder splits = new LongAdder();
+
+    /**
+     * Notified of each merge and split so the loader can emit the RFC-0009 §5
+     * {@code region_merge}/{@code region_split} events, which carry the level
+     * label this class has no way to know.
+     *
+     * <p>Default no-op, and the loader clears it back to no-op when the
+     * observability module goes inactive: R6 wants zero residue, and a listener
+     * left installed is residue.
+     */
+    private TopologyListener topologyListener = TopologyListener.NO_OP;
+
+    /** Receives topology mutations; see {@link #setTopologyListener}. */
+    public interface TopologyListener {
+
+        TopologyListener NO_OP = new TopologyListener() {
+            @Override
+            public void onMerge(long resultId, long[] absorbedIds, int chunksAfter) {
+                // Nothing observes topology by default.
+            }
+
+            @Override
+            public void onSplit(long sourceId, long[] resultIds, int chunksAfter) {
+                // Nothing observes topology by default.
+            }
+        };
+
+        /** One chunk load bridged {@code absorbedIds} into {@code resultId}. */
+        void onMerge(long resultId, long[] absorbedIds, int chunksAfter);
+
+        /** {@code sourceId} was no longer connected and shed {@code resultIds}. */
+        void onSplit(long sourceId, long[] resultIds, int chunksAfter);
+    }
+
     public RegionManager(int mergeDistance, long worldSeed) {
         if (mergeDistance < 1) {
             throw new IllegalArgumentException("mergeDistance must be >= 1");
@@ -87,6 +134,7 @@ public final class RegionManager {
         }
 
         Region home;
+        long[] absorbed = EMPTY_IDS;
         if (neighbors.isEmpty()) {
             home = new Region(nextRegionId.getAndIncrement(), worldSeed);
             regions.add(home);
@@ -95,15 +143,25 @@ public final class RegionManager {
             home = neighbors.stream()
                     .max((a, b) -> Integer.compare(a.chunks().size(), b.chunks().size()))
                     .orElseThrow();
+            int absorbedCount = 0;
+            long[] ids = new long[neighbors.size() - 1];
             for (Region other : neighbors) {
                 if (other != home) {
+                    ids[absorbedCount++] = other.id();
                     absorb(home, other);
                 }
             }
+            absorbed = absorbedCount == ids.length ? ids : Arrays.copyOf(ids, absorbedCount);
         }
         home.chunks().add(key);
         chunkToRegion.put(key, home);
         home.reseed();
+        if (absorbed.length > 0) {
+            // One event per bridging load, not per absorbed region: what an
+            // operator wants to see is "these N became one", once.
+            merges.add(absorbed.length);
+            topologyListener.onMerge(home.id(), absorbed, home.chunks().size());
+        }
         return home;
     }
 
@@ -121,6 +179,21 @@ public final class RegionManager {
     /** RFC-0007 §3.3: receives queued mail from split or dropped regions. */
     public void setStrandedMailSink(Consumer<Message> sink) {
         this.strandedMailSink = sink;
+    }
+
+    /** WS-7: observe topology mutations. Pass {@code null} to detach (R6). */
+    public void setTopologyListener(TopologyListener listener) {
+        this.topologyListener = listener == null ? TopologyListener.NO_OP : listener;
+    }
+
+    /** Regions absorbed into another by a bridging chunk load, since construction. */
+    public long merges() {
+        return merges.sum();
+    }
+
+    /** Regions shed by a disconnection, since construction. */
+    public long splits() {
+        return splits.sum();
     }
 
     /** Unload a chunk. Caller should run {@link #recomputeSplits()} afterwards. */
@@ -167,8 +240,10 @@ public final class RegionManager {
             r.mailbox().drain().forEach(strandedMailSink);
             // Keep the largest component in place; move the rest out.
             components.sort((a, b) -> Integer.compare(b.size(), a.size()));
+            long[] resultIds = new long[components.size() - 1];
             for (int i = 1; i < components.size(); i++) {
                 Region split = new Region(nextRegionId.getAndIncrement(), worldSeed);
+                resultIds[i - 1] = split.id();
                 regions.add(split);
                 for (long key : components.get(i)) {
                     r.chunks().remove(key);
@@ -178,6 +253,8 @@ public final class RegionManager {
                 split.reseed();
             }
             r.reseed();
+            splits.add(resultIds.length);
+            topologyListener.onSplit(r.id(), resultIds, r.chunks().size());
         }
     }
 

@@ -73,6 +73,38 @@ jobs:
       - name: Show benchmark results
         if: always()
         run: cat weft-neoforge/run/gametest/weft-bench.json || true
+      # WS-7 / RFC-0009 §10.1: the authoritative exposition-conformance gate.
+      # promtool is the canonical Prometheus parser AND a naming/unit linter, so
+      # this catches both malformed exposition (silent: a scraper records nothing
+      # and nobody notices) and convention drift in the metric names. It runs
+      # against the scrape the gametest captured from a real booted server, not a
+      # synthetic fixture. The offline JUnit half is ExpositionFormatTest.
+      - name: Verify exposition format with promtool
+        run: |
+          set -euo pipefail
+          SCRAPE=weft-neoforge/run/gametest/weft-metrics-scrape.txt
+          if [ ! -s "$SCRAPE" ]; then
+            echo "::error::$SCRAPE is missing or empty - the observability gametest"
+            echo "::error::did not capture a scrape, so exposition conformance is unverified."
+            exit 1
+          fi
+          PROM_VERSION=3.13.2
+          curl -sSfL -o /tmp/prometheus.tar.gz \
+            "https://github.com/prometheus/prometheus/releases/download/v${PROM_VERSION}/prometheus-${PROM_VERSION}.linux-amd64.tar.gz"
+          tar -xzf /tmp/prometheus.tar.gz -C /tmp
+          PROMTOOL=/tmp/prometheus-${PROM_VERSION}.linux-amd64/promtool
+          echo "Scraped $(grep -vc '^#' "$SCRAPE") series from the gametest server."
+          # check metrics reads on stdin and exits nonzero on a parse error or a
+          # lint violation (missing/incorrect unit suffix, counter without _total,
+          # non-base units).
+          "$PROMTOOL" check metrics < "$SCRAPE"
+      - name: Upload the scrape for inspection
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: weft-metrics-scrape
+          path: weft-neoforge/run/gametest/weft-metrics-scrape.txt
+          if-no-files-found: warn
       - name: Compare against recorded baseline
         uses: benchmark-action/github-action-benchmark@v1
         with:

@@ -27,7 +27,13 @@ public final class WeftCommands {
                 Commands.literal("weft")
                         .requires(source -> source.hasPermission(2))
                         .executes(ctx -> usage(ctx.getSource()))
-                        .then(Commands.literal("report").executes(ctx -> report(ctx.getSource())))
+                        .then(Commands.literal("report")
+                                .executes(ctx -> report(ctx.getSource()))
+                                // WS-7 (RFC-0009 sec. 6): the same window as data.
+                                // The text report is unchanged and stays the human
+                                // surface; this is additive.
+                                .then(Commands.literal("--json")
+                                        .executes(ctx -> reportJson(ctx.getSource()))))
                         .then(Commands.literal("status").executes(ctx -> status(ctx.getSource())))
                         .then(Commands.literal("services").executes(ctx -> services(ctx.getSource())))
                         .then(Commands.literal("profile")
@@ -40,7 +46,9 @@ public final class WeftCommands {
         source.sendSuccess(() -> Component.literal(
                 "/weft report - regionizability report | /weft profile [on|off] - toggle profiling"
                         + " | /weft services - P1 service status"
-                        + " | /weft status - module posture (RFC-0003)"), false);
+                        + " | /weft status - module posture (RFC-0003)"
+                        + " | /weft report --json - the same window as weft-report.json"),
+                false);
         return Command.SINGLE_SUCCESS;
     }
 
@@ -70,6 +78,23 @@ public final class WeftCommands {
             source.sendSuccess(() -> Component.literal("Written to " + written), false);
         } catch (IOException e) {
             source.sendFailure(Component.literal("Could not write weft-report.txt: " + e.getMessage()));
+        }
+        return Command.SINGLE_SUCCESS;
+    }
+
+    /**
+     * WS-7 (RFC-0009 sec. 6): write {@code weft-report.json} beside the existing
+     * text file. Same content, machine-readable, field names pinned by the
+     * committed event schema so a consumer can rely on them.
+     */
+    private static int reportJson(CommandSourceStack source) {
+        try {
+            Path written = WeftProfiler.get().writeReportJson(
+                    source.getServer().getServerDirectory());
+            source.sendSuccess(() -> Component.literal("Written to " + written), false);
+        } catch (IOException e) {
+            source.sendFailure(Component.literal(
+                    "Could not write weft-report.json: " + e.getMessage()));
         }
         return Command.SINGLE_SUCCESS;
     }

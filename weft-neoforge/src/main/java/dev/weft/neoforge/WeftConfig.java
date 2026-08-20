@@ -243,6 +243,95 @@ public final class WeftConfig {
             .defineListAllowEmpty("forceDisableModules", List.of(),
                     () -> "module_id", o -> o instanceof String s && !s.isBlank());
 
+    // --- WS-7: observability exporter (RFC-0009; kill switch per RFC-0003 R1) ---
+    //
+    // Every default is chosen so an unaware operator is unaffected and, more
+    // importantly, unexposed. The module is off until someone turns it on, and
+    // even then it listens on loopback only.
+
+    static {
+        BUILDER.comment("WS-7 (RFC-0009): structured telemetry egress - a Prometheus scrape",
+                        "endpoint and a newline-delimited JSON event stream. Weft-specific",
+                        "series nobody else has: region topology, per-mod legacy-lane cost,",
+                        "guard trips, module posture, worker/mail internals.",
+                        "Both surfaces are OFF by default and independent (RFC-0003 R1).")
+               .push("observability");
+    }
+
+    private static final ModConfigSpec.BooleanValue METRICS_ENABLED_SPEC = BUILDER
+            .comment("Serve the Prometheus scrape endpoint. Opt-in.")
+            .define("metricsEnabled", false);
+
+    private static final ModConfigSpec.ConfigValue<String> METRICS_BIND_ADDRESS_SPEC = BUILDER
+            .comment("Address the metrics endpoint binds. LOOPBACK ONLY BY DEFAULT, and",
+                    "read this before changing it: the endpoint is deliberately",
+                    "unauthenticated (Prometheus convention - a half-built auth scheme is",
+                    "worse than none), and it exposes your mod list, player counts and",
+                    "world topology. Exposing it to the internet leaks all of that to",
+                    "anyone who scans your port. Remote scraping is your explicit",
+                    "decision: set this to your private interface, ideally behind your own",
+                    "reverse proxy with TLS and auth. \"0.0.0.0\" means every interface.")
+            .define("metricsBindAddress", "127.0.0.1");
+
+    private static final ModConfigSpec.IntValue METRICS_PORT_SPEC = BUILDER
+            .comment("Port for the metrics endpoint. If it is already taken - another",
+                    "exporter, a plugin, anything - Weft logs one line, yields the port and",
+                    "self-disables this module (RFC-0003 rung 3). The tick is unaffected.")
+            .defineInRange("metricsPort", 9940, 1, 65535);
+
+    private static final ModConfigSpec.BooleanValue JVM_METRICS_ENABLED_SPEC = BUILDER
+            .comment("Export weft_jvm_* (heap gauges, cumulative GC counters). Turn this OFF",
+                    "if another exporter already covers your JVM, to avoid duplicate scrape",
+                    "cost. On by default because no exporter mod ships on NeoForge 1.21.1,",
+                    "so Weft is usually the only source (RFC-0009 sec. 8.2). GC *pause",
+                    "histograms* are deliberately not here - that needs a notification",
+                    "listener and belongs to WS-6.2.")
+            .define("jvmMetricsEnabled", true);
+
+    private static final ModConfigSpec.BooleanValue EVENT_STREAM_ENABLED_SPEC = BUILDER
+            .comment("Write the newline-delimited JSON event stream: guard trips, module",
+                    "state changes, service fallbacks, region merges/splits, config changes,",
+                    "tick outliers - the discrete things a 10s gauge sample loses. Point",
+                    "Vector/Promtail/Fluent Bit at the file. Opt-in.")
+            .define("eventStreamEnabled", false);
+
+    private static final ModConfigSpec.ConfigValue<String> EVENT_STREAM_PATH_SPEC = BUILDER
+            .comment("Event stream file, relative to the server directory.")
+            .define("eventStreamPath", "logs/weft-events.ndjson");
+
+    private static final ModConfigSpec.IntValue EVENT_STREAM_MAX_MB_SPEC = BUILDER
+            .comment("Rotate the event stream at this size. One predecessor (.1) is kept, so",
+                    "the stream costs at most twice this on disk and cannot fill it.")
+            .defineInRange("eventStreamMaxMB", 128, 1, 16384);
+
+    private static final ModConfigSpec.IntValue MAX_LABEL_CARDINALITY_SPEC = BUILDER
+            .comment("Maximum series per metric family before the tail is folded into an",
+                    "__other__ bucket, ranked by cost so the expensive ones survive.",
+                    "modid and type labels are unbounded in principle; on a 400-mod pack an",
+                    "uncapped exporter can OOM a Prometheus instance.")
+            .defineInRange("maxLabelCardinality", 50, 1, 10_000);
+
+    private static final ModConfigSpec.DoubleValue TICK_OUTLIER_FACTOR_SPEC = BUILDER
+            .comment("Emit a tick_outlier event for any tick exceeding this multiple of the",
+                    "rolling median tick duration, with the top cost sources attached.",
+                    "Median, not mean: tick durations are right-skewed and one GC pause",
+                    "drags a mean while barely moving a median.")
+            .defineInRange("tickOutlierFactor", 4.0, 1.01, 1000.0);
+
+    private static final ModConfigSpec.BooleanValue REGION_TIMING_ENABLED_SPEC = BUILDER
+            .comment("Time each region bucket and each fan-out barrier (RFC-0009 sec. 9.2).",
+                    "This is the one new measurement WS-7 adds to the tick path: two",
+                    "System.nanoTime() calls per BUCKET per section - O(buckets), not",
+                    "O(units); the P0 profiler pays two per entity. It is what makes",
+                    "per-region tick duration, hottest-region share and an honest worker",
+                    "utilisation ratio possible at all. No effect while the observability",
+                    "module is inactive; off means those series are absent, not zero.")
+            .define("regionTimingEnabled", true);
+
+    static {
+        BUILDER.pop();
+    }
+
     public static final ModConfigSpec SPEC = BUILDER.build();
 
     // --- cached values (defaults mirror the spec; refreshed on config events) ---
@@ -277,6 +366,17 @@ public final class WeftConfig {
     public static volatile int BLOCK_ENTITY_SHARD_MIN_UNITS = 64;
     public static volatile boolean OWNER_MAIL_ROUTING = false;
     public static volatile boolean LEGACY_LANE = false;
+    // WS-7 observability (RFC-0009 sec. 7)
+    public static volatile boolean METRICS_ENABLED = false;
+    public static volatile String METRICS_BIND_ADDRESS = "127.0.0.1";
+    public static volatile int METRICS_PORT = 9940;
+    public static volatile boolean JVM_METRICS_ENABLED = true;
+    public static volatile boolean EVENT_STREAM_ENABLED = false;
+    public static volatile String EVENT_STREAM_PATH = "logs/weft-events.ndjson";
+    public static volatile int EVENT_STREAM_MAX_MB = 128;
+    public static volatile int MAX_LABEL_CARDINALITY = 50;
+    public static volatile double TICK_OUTLIER_FACTOR = 4.0;
+    public static volatile boolean REGION_TIMING_ENABLED = true;
     public static volatile Set<String> FORCE_ENABLE_MODULES = Set.of();
     public static volatile Set<String> FORCE_DISABLE_MODULES = Set.of();
 
@@ -335,6 +435,16 @@ public final class WeftConfig {
         BLOCK_ENTITY_SHARD_MIN_UNITS = BLOCK_ENTITY_SHARD_MIN_UNITS_SPEC.get();
         OWNER_MAIL_ROUTING = OWNER_MAIL_ROUTING_SPEC.get();
         LEGACY_LANE = LEGACY_LANE_SPEC.get();
+        METRICS_ENABLED = METRICS_ENABLED_SPEC.get();
+        METRICS_BIND_ADDRESS = METRICS_BIND_ADDRESS_SPEC.get();
+        METRICS_PORT = METRICS_PORT_SPEC.get();
+        JVM_METRICS_ENABLED = JVM_METRICS_ENABLED_SPEC.get();
+        EVENT_STREAM_ENABLED = EVENT_STREAM_ENABLED_SPEC.get();
+        EVENT_STREAM_PATH = EVENT_STREAM_PATH_SPEC.get();
+        EVENT_STREAM_MAX_MB = EVENT_STREAM_MAX_MB_SPEC.get();
+        MAX_LABEL_CARDINALITY = MAX_LABEL_CARDINALITY_SPEC.get();
+        TICK_OUTLIER_FACTOR = TICK_OUTLIER_FACTOR_SPEC.get();
+        REGION_TIMING_ENABLED = REGION_TIMING_ENABLED_SPEC.get();
         FORCE_ENABLE_MODULES = Set.copyOf(FORCE_ENABLE_MODULES_SPEC.get());
         FORCE_DISABLE_MODULES = Set.copyOf(FORCE_DISABLE_MODULES_SPEC.get());
     }

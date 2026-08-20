@@ -1,0 +1,613 @@
+{
+  "__inputs": [
+    {
+      "name": "DS_PROMETHEUS",
+      "label": "Prometheus",
+      "description": "The Prometheus instance scraping weft's /metrics endpoint.",
+      "type": "datasource",
+      "pluginId": "prometheus",
+      "pluginName": "Prometheus"
+    }
+  ],
+  "title": "Weft — server engine",
+  "uid": "weft-overview",
+  "description": "RFC-0002 WS-7 / RFC-0009. Panels are Weft-specific series nobody else has: region topology, per-mod legacy-lane attribution, guard trips, module posture, worker internals. Panels fed by an inactive Weft module are legitimately EMPTY, not zero — see RFC-0009 §4.",
+  "tags": ["weft", "minecraft"],
+  "timezone": "browser",
+  "editable": true,
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-1h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "label": "Data source",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {},
+        "hide": 0
+      },
+      {
+        "name": "level",
+        "label": "Dimension",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "query": "label_values(weft_regions, level)",
+        "refresh": 1,
+        "includeAll": true,
+        "multi": true,
+        "current": { "text": "All", "value": "$__all" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "row",
+      "title": "Tick",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "TPS",
+      "description": "From the median tick period, capped at 20 — vanilla sleeps to hold that rate, so 20 means healthy and anything below it means the server is behind.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 7, "w": 6, "x": 0, "y": 1 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "min": 0,
+          "max": 20,
+          "custom": { "fillOpacity": 10, "lineWidth": 2 },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 15 },
+              { "color": "green", "value": 19 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "weft_tps",
+          "legendFormat": "tps"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "MSPT — percentiles and phase breakdown",
+      "description": "weft_mspt_seconds is vanilla's own 100-tick mean: the number /tps and spark show an admin, here for cross-checking. The percentiles are over the tick PERIOD (head to head, sleep included), which is why they sit near 50ms on a healthy server — see RFC-0009 §3.1. Engine pipeline phases are stacked below; they are NOT vanilla's tick sections.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 7, "w": 12, "x": 6, "y": 1 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "fillOpacity": 0, "lineWidth": 2 }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byRegexp", "options": "phase .*" },
+            "properties": [
+              { "id": "custom.fillOpacity", "value": 25 },
+              { "id": "custom.stacking", "value": { "mode": "normal", "group": "phase" } },
+              { "id": "custom.lineWidth", "value": 0 }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "weft_mspt_seconds",
+          "legendFormat": "MSPT (vanilla mean)"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(weft_tick_period_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "period p50"
+        },
+        {
+          "refId": "C",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(weft_tick_period_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "period p95"
+        },
+        {
+          "refId": "D",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(weft_tick_period_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "period p99"
+        },
+        {
+          "refId": "E",
+          "expr": "sum by (phase) (rate(weft_tick_phase_duration_seconds_sum[$__rate_interval])) / sum by (phase) (rate(weft_tick_phase_duration_seconds_count[$__rate_interval]))",
+          "legendFormat": "phase {{phase}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Vanilla section duration (p95)",
+      "description": "The section ruler: time a vanilla entity or block-entity section spent executing its region buckets. This is the metric to judge a change confined to one section by — full-tick MSPT swamped exactly that measurement during P2 (see SectionSamples). Requires observability.regionTimingEnabled.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 7, "w": 6, "x": 18, "y": 1 },
+      "fieldConfig": {
+        "defaults": { "unit": "s", "custom": { "fillOpacity": 10, "lineWidth": 2 } },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, section) (rate(weft_section_duration_seconds_bucket{level=~\"$level\"}[$__rate_interval])))",
+          "legendFormat": "{{section}} p95"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Legacy lane — per-mod tick attribution",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 8 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Per-mod legacy-lane cost — the flagship panel",
+      "description": "RFC-0001 §9.1's \"your tick is 61% mod X\" number, which nothing else in the ecosystem can tell you. Seconds of lane execution per second of wall clock, by owning mod: 0.05 means that mod is eating a whole tick's worth of budget every second. EMPTY when the legacy_lane module is off — that is correct, not a gap.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 9 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 40,
+            "lineWidth": 1,
+            "stacking": { "mode": "normal", "group": "mod" }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["mean", "max"] }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "topk(15, sum by (modid) (rate(weft_legacy_mod_cost_seconds_total[$__rate_interval])))",
+          "legendFormat": "{{modid}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Legacy lane pass duration & extraction rate",
+      "description": "How long each Phase-4 lane pass takes, and how many tick units are being pulled out of the vanilla sections to run in it.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 9 },
+      "fieldConfig": {
+        "defaults": { "custom": { "fillOpacity": 10, "lineWidth": 2 } },
+        "overrides": [
+          {
+            "matcher": { "id": "byRegexp", "options": ".*pass.*" },
+            "properties": [{ "id": "unit", "value": "s" }]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(weft_legacy_lane_duration_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "pass p95"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (kind) (rate(weft_legacy_extracted_units_total[$__rate_interval]))",
+          "legendFormat": "extractions/s {{kind}}"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Regions",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 18 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Region count & hottest-region share",
+      "description": "RFC-0002 WS-7 names this panel as an acceptance criterion. Hottest-region share is the largest region's chunks over all loaded chunks: at 1.0 the whole world is one region, which is the solo-play case where region-level parallelism can do nothing and WS-10 sharding is the only lever.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 19 },
+      "fieldConfig": {
+        "defaults": { "custom": { "fillOpacity": 10, "lineWidth": 2 } },
+        "overrides": [
+          {
+            "matcher": { "id": "byRegexp", "options": ".*share.*" },
+            "properties": [
+              { "id": "unit", "value": "percentunit" },
+              { "id": "max", "value": 1 },
+              { "id": "custom.axisPlacement", "value": "right" }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "weft_regions{level=~\"$level\"}",
+          "legendFormat": "regions {{level}}"
+        },
+        {
+          "refId": "B",
+          "expr": "weft_region_largest_chunks{level=~\"$level\"} / clamp_min(weft_region_chunks_loaded{level=~\"$level\"}, 1)",
+          "legendFormat": "hottest share {{level}}"
+        },
+        {
+          "refId": "C",
+          "expr": "sum(rate(weft_region_merges_total[$__rate_interval]))",
+          "legendFormat": "merges/s"
+        },
+        {
+          "refId": "D",
+          "expr": "sum(rate(weft_region_splits_total[$__rate_interval]))",
+          "legendFormat": "splits/s"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Region tick duration (p95) & bucket count",
+      "description": "Per-region bucket execution time, from the RFC-0009 §9.2 probe. Requires observability.regionTimingEnabled; absent otherwise.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 19 },
+      "fieldConfig": {
+        "defaults": { "custom": { "fillOpacity": 10, "lineWidth": 2 } },
+        "overrides": [
+          {
+            "matcher": { "id": "byRegexp", "options": ".*p95.*" },
+            "properties": [{ "id": "unit", "value": "s" }]
+          },
+          {
+            "matcher": { "id": "byRegexp", "options": "buckets.*" },
+            "properties": [{ "id": "custom.axisPlacement", "value": "right" }]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, level) (rate(weft_region_tick_duration_seconds_bucket{level=~\"$level\"}[$__rate_interval])))",
+          "legendFormat": "p95 {{level}}"
+        },
+        {
+          "refId": "B",
+          "expr": "weft_region_buckets",
+          "legendFormat": "buckets {{section}}"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Workers & mail",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 27 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Worker utilisation & barrier wait",
+      "description": "Utilisation is bucket busy time over barrier wall time × buckets — a real work-conservation figure from the §9.2 probe, not a scrape-time sample of a pool that is idle between sections (RFC-0009 §3.3). 1.0 means every bucket ran for the whole barrier; low values with a high barrier wait mean one region dominates.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 28 },
+      "fieldConfig": {
+        "defaults": { "custom": { "fillOpacity": 10, "lineWidth": 2 } },
+        "overrides": [
+          {
+            "matcher": { "id": "byRegexp", "options": "utilisation.*" },
+            "properties": [
+              { "id": "unit", "value": "percentunit" },
+              { "id": "max", "value": 1 }
+            ]
+          },
+          {
+            "matcher": { "id": "byRegexp", "options": "barrier.*" },
+            "properties": [
+              { "id": "unit", "value": "s" },
+              { "id": "custom.axisPlacement", "value": "right" }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "weft_worker_utilization_ratio",
+          "legendFormat": "utilisation {{pool}}"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (le, section) (rate(weft_barrier_wait_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "barrier p95 {{section}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Pool queue depth & steal rate",
+      "description": "Queue depth is deliberately not a utilisation signal — the fan-out is barriered inside a tick section, so a 10s sample usually lands between sections and reads zero. A sustained non-zero depth means real backlog. Steals are monotonic, so their rate is honest.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 28 },
+      "fieldConfig": {
+        "defaults": { "custom": { "fillOpacity": 10, "lineWidth": 2 } },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "weft_worker_queue_depth",
+          "legendFormat": "queue {{pool}}"
+        },
+        {
+          "refId": "B",
+          "expr": "rate(weft_worker_steals_total[$__rate_interval])",
+          "legendFormat": "steals/s {{pool}}"
+        },
+        {
+          "refId": "C",
+          "expr": "weft_worker_parallelism",
+          "legendFormat": "parallelism {{pool}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Owner mail by outcome",
+      "description": "RFC-0007 §3 delivery outcomes. A rising inline_fallback means positions are not mapping to regions; a non-zero flushed_on_deactivate means routing was turned off with mail still queued.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 28 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "fillOpacity": 30,
+            "lineWidth": 1,
+            "stacking": { "mode": "normal", "group": "mail" }
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(weft_mail_messages_total[$__rate_interval]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Safety — page a human for these",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 36 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Guard trips",
+      "description": "Ownership violations (RFC-0001 §4.4). severity=degraded_to_mail is a compat fact — the write was rerouted to its owner and the world is fine. severity=dev_throw or hardened_throw means a tick crashed. Any non-zero rate here deserves a look at the guard_trip lines in the event stream, which carry the full forensics.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 37 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "fillOpacity": 40, "lineWidth": 1 },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 0.001 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (kind, severity) (rate(weft_guard_trips_total[$__rate_interval]))",
+          "legendFormat": "{{kind}} / {{severity}}"
+        }
+      ]
+    },
+    {
+      "type": "state-timeline",
+      "title": "Module posture (RFC-0003 R5)",
+      "description": "The same table /weft status prints and the startup log logs, derived from the same function so they cannot disagree. A module dropping to yielded or self_disabled mid-run is the thing to notice; the event stream carries a module_state_change line for each transition.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 10, "x": 8, "y": 37 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "lineWidth": 0, "fillOpacity": 80 },
+          "mappings": [
+            { "type": "value", "options": { "1": { "text": "on", "color": "green", "index": 0 } } },
+            { "type": "value", "options": { "0": { "text": "", "color": "transparent", "index": 1 } } }
+          ]
+        },
+        "overrides": []
+      },
+      "options": { "showValue": "never", "mergeValues": true, "legend": { "showLegend": true } },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "weft_module_state == 1",
+          "legendFormat": "{{module}} = {{state}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Service health",
+      "description": "P1 off-thread services. fell_back means a tick used vanilla's synchronous scan instead; a non-zero failed rate or a latched service means the module took itself out of the loop. Parity rate is 1 - mismatches/verify-ticks, and should sit at 1.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 37 },
+      "fieldConfig": {
+        "defaults": { "custom": { "fillOpacity": 10, "lineWidth": 2 } },
+        "overrides": [
+          {
+            "matcher": { "id": "byRegexp", "options": "parity.*" },
+            "properties": [
+              { "id": "unit", "value": "percentunit" },
+              { "id": "custom.axisPlacement", "value": "right" }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (service, outcome) (rate(weft_service_requests_total[$__rate_interval]))",
+          "legendFormat": "{{service}} {{outcome}}/s"
+        },
+        {
+          "refId": "B",
+          "expr": "1 - (sum(rate(weft_spawn_density_parity_mismatch_ticks_total[$__rate_interval])) / clamp_min(sum(rate(weft_spawn_density_parity_ticks_total[$__rate_interval])), 0.0001))",
+          "legendFormat": "parity rate"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Cost attribution & JVM",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 45 },
+      "collapsed": true,
+      "panels": [
+        {
+          "type": "barchart",
+          "title": "Top cost sources (profiler window)",
+          "description": "Gauges over the rolling profiler window, not counters — see RFC-0009 §3.2/§3.11 for why a since-boot total would have been a lie. Divide by weft_profiler_window_ticks for per-tick cost.",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 9, "w": 12, "x": 0, "y": 46 },
+          "fieldConfig": {
+            "defaults": { "unit": "s" },
+            "overrides": []
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "topk(15, sum by (type, source) (weft_unit_cost_seconds))",
+              "legendFormat": "{{source}} {{type}}",
+              "instant": true
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Entities by mob category",
+          "description": "From the incremental census, which tracks by MobCategory because that is what the mobcap is expressed in (RFC-0009 §3.11).",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 9, "w": 6, "x": 12, "y": 46 },
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "fillOpacity": 30,
+                "lineWidth": 1,
+                "stacking": { "mode": "normal", "group": "cat" }
+              }
+            },
+            "overrides": []
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (category) (weft_entities{level=~\"$level\"})",
+              "legendFormat": "{{category}}"
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Heap & GC",
+          "description": "A counter pair rather than a pause histogram: rate(gc_seconds)/rate(gc_collections) is mean pause. Real pause attribution needs a GC notification listener and belongs to WS-6.2 (RFC-0009 §8.2). Set observability.jvmMetricsEnabled=false if another exporter already covers your JVM.",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 9, "w": 6, "x": 18, "y": 46 },
+          "fieldConfig": {
+            "defaults": { "custom": { "fillOpacity": 10, "lineWidth": 2 } },
+            "overrides": [
+              {
+                "matcher": { "id": "byRegexp", "options": "heap.*" },
+                "properties": [{ "id": "unit", "value": "bytes" }]
+              },
+              {
+                "matcher": { "id": "byRegexp", "options": "mean pause.*" },
+                "properties": [
+                  { "id": "unit", "value": "s" },
+                  { "id": "custom.axisPlacement", "value": "right" }
+                ]
+              }
+            ]
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "weft_jvm_heap_bytes",
+              "legendFormat": "heap {{area}}"
+            },
+            {
+              "refId": "B",
+              "expr": "rate(weft_jvm_gc_seconds_total[$__rate_interval]) / clamp_min(rate(weft_jvm_gc_collections_total[$__rate_interval]), 0.0001)",
+              "legendFormat": "mean pause {{collector}}"
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Exporter health",
+          "description": "The exporter reporting on itself. A non-zero duplicate-series rate means two collectors publish the same series — a bug in Weft. event_stream_healthy dropping to 0 means a write failure latched the sink off; dropped events mean the queue filled, which protects the tick by design.",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 55 },
+          "fieldConfig": {
+            "defaults": { "custom": { "fillOpacity": 10, "lineWidth": 2 } },
+            "overrides": []
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "rate(weft_scrapes_total[$__rate_interval])",
+              "legendFormat": "scrapes/s"
+            },
+            {
+              "refId": "B",
+              "expr": "rate(weft_scrape_duration_seconds_total[$__rate_interval])",
+              "legendFormat": "scrape time/s"
+            },
+            {
+              "refId": "C",
+              "expr": "rate(weft_event_stream_events_total[$__rate_interval])",
+              "legendFormat": "events/s {{kind}}"
+            },
+            {
+              "refId": "D",
+              "expr": "rate(weft_event_stream_dropped_total[$__rate_interval])",
+              "legendFormat": "dropped/s"
+            },
+            {
+              "refId": "E",
+              "expr": "weft_event_stream_healthy",
+              "legendFormat": "sink healthy"
+            },
+            {
+              "refId": "F",
+              "expr": "rate(weft_scrape_duplicate_series_total[$__rate_interval])",
+              "legendFormat": "duplicate series/s"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

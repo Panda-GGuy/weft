@@ -45,6 +45,31 @@ fi
 
 bash "$REPO_ROOT/scripts/neighbors/make-stub-mod.sh" "$MODID" "$GAMEDIR/mods"
 
+# WS-7 (RFC-0009 sec. 8.1): some conflicts are not modid-shaped. The metrics
+# endpoint's only real neighbour conflict is a port collision, and a port
+# collision is detected by BINDING, not by a registry lookup - which is why it
+# also catches Bukkit plugins behind a proxy and unrelated processes. This cell
+# occupies the port with a plain listener and asserts the module yields it.
+SQUATTER_PID=""
+if [ -n "${WEFT_OCCUPY_PORT:-}" ]; then
+  log "occupying 127.0.0.1:$WEFT_OCCUPY_PORT so the exporter must yield it"
+  python3 - "$WEFT_OCCUPY_PORT" <<'PY' &
+import socket, sys, time
+s = socket.socket()
+s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind(("127.0.0.1", int(sys.argv[1])))
+s.listen(1)
+time.sleep(1800)
+PY
+  SQUATTER_PID=$!
+  # Fail fast rather than boot a server that would have bound the port anyway.
+  sleep 2
+  if ! kill -0 "$SQUATTER_PID" 2>/dev/null; then
+    log "FAIL: could not occupy port $WEFT_OCCUPY_PORT"
+    exit 1
+  fi
+fi
+
 (cd "$REPO_ROOT" && ./gradlew :weft-neoforge:runServer -PwithNeoForge --console=plain \
     > "$LOGFILE" 2>&1) &
 GRADLE_PID=$!
@@ -87,5 +112,6 @@ if grep -qE 'Fatal|Exception in server tick loop|crash-report' "$LOGFILE"; then
   STATUS=1
 fi
 rm -f "$GAMEDIR"/mods/stub-*.jar
+[ -n "$SQUATTER_PID" ] && kill "$SQUATTER_PID" 2>/dev/null || true
 [ "$STATUS" = 0 ] && log "PASS"
 exit "$STATUS"

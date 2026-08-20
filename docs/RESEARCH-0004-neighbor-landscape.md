@@ -63,6 +63,38 @@ count or published-version matrix in the doc set is verified. Do not quote one.
 | **Krypton**, **C2ME**, **ModernFix** | In RFC-0003 §3's table with decided postures | Modids unconfirmed → decided but **not enforced**. C2ME is Fabric-only at the mod level. Krypton's overlap (WS-9) doesn't exist yet; ModernFix's `cooperate` is already the default for unknown mods |
 | **Chunky** | `ChunkyAPI` (`isRunning(world)`, `onGenerationProgress`, `onGenerationComplete`) stops a pregen run from poisoning `/weft report`'s hypothetical-region estimate. Has `neoforge` **and `folia`** platform modules — region-aware pregen has a working precedent | Not yet integrated. Its `neoforge.mods.toml` templates `modId = "${id}"`, so the modid needs resolving before a registry row |
 
+### 2.1 The metrics exporters (WS-7 / RFC-0009 §8.1)
+
+The WS-7 brief asked for `cooperate` rows for five exporter tools. **None of them
+gets one**, and the reasoning is worth keeping because it is a clean worked
+example of §5's standing rule.
+
+| Tool | Why it matters | Why no row |
+|---|---|---|
+| **sladkoff/minecraft-prometheus-exporter**, **cpburnz/minecraft-prometheus-exporter** | The two most-deployed Prometheus exporters for Minecraft servers | **Bukkit/Spigot plugins. They have no modid and never will** — a registry row for either is a category error, not a missing lookup |
+| **Prometheus Exporter** (CurseForge) | Ships Forge/Fabric/NeoForge builds; the closest thing to a direct neighbour | Its latest NeoForge build is **1.21.4, not 1.21.1** (RESEARCH-0003 §4.1). It cannot be present on Weft's platform at all today |
+| **Observable** (Modrinth), **Maykesh's Server Observability Framework** (CurseForge) | Plausible real neighbours: tile-entity/tick-time profiling and tick/entity/chunk/network metrics respectively | **Modids not verified in this repo**, and §4 lists "a network path to Modrinth" as an open blocker. Guessing one is the exact failure the modid column exists to prevent: it looks like coverage and matches nothing |
+| **UnifiedMetrics**, **FabricExporter** | Named in RESEARCH-0001 §4 | No 1.21.1 / Fabric-only. Nothing to coexist with |
+
+Two further reasons the rows would be worse than useless even with verified
+modids:
+
+1. **`cooperate` is already the registry default for unknown mods.** Five
+   `cooperate` rows would change no runtime behaviour whatsoever — decoration
+   that reads as coverage.
+2. **The one real conflict is a port collision, and a port collision is detected
+   by *binding*, not by modid.** `bind()` fails → log one line naming the
+   address, yield the port, self-disable (rung 3), keep serving. That catches
+   every exporter mod, every Bukkit plugin under a proxy, every unrelated process
+   on the box, and mods that do not exist yet — a modid registry catches none of
+   those. Enforced by the R7 `metrics-port` matrix cell and by
+   `MetricsHttpServerTest` / `ObservabilityGameTests`.
+
+**What we deliberately cannot do:** name the neighbour holding the port. Mapping
+a listening socket to a mod means process inspection, and RFC-0003 §4 forbids
+reaching into neighbours' internals — scraping a neighbour's HTTP endpoint to
+identify it is worse. The log reports the port, not the culprit.
+
 ## 3. Platform facts worth not re-deriving
 
 - **Sinytra Connector's primary supported version is 1.21.1** — our exact

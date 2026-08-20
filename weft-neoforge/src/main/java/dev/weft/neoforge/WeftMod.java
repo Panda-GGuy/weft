@@ -161,6 +161,10 @@ public final class WeftMod {
     }
 
     private void onServerAboutToStart(ServerAboutToStartEvent event) {
+        // WS-7 (RFC-0009): the observability module needs the server directory —
+        // event sink path, persisted server id — before the ladder resolves it,
+        // because resolving it is what starts the endpoint.
+        dev.weft.neoforge.observability.WeftObservability.onServerAboutToStart(event.getServer());
         // RFC-0003 R5: resolve every module down the coexistence ladder and
         // log the one-glance posture table before anything starts working.
         WeftModules.resolveAndLog();
@@ -175,6 +179,9 @@ public final class WeftMod {
     }
 
     private void onServerStopping(ServerStoppingEvent event) {
+        // Telemetry first (R6): the socket, the writer thread and the file handle
+        // go before the state they describe is torn down.
+        dev.weft.neoforge.observability.WeftObservability.onServerStopping();
         // Pathfinding workers first: they post into the scheduler's inbox.
         dev.weft.neoforge.path.PathfindingHooks.shutdown();
         // Level instances die with the server; drop their region-owner ids,
@@ -196,6 +203,10 @@ public final class WeftMod {
     public static void onVanillaTick() {
         WeftProfiler profiler = WeftProfiler.get();
         profiler.onTickStart();
+        // WS-7 (RFC-0009 §9.1): one volatile read while the module is off — not
+        // even a clock read, so the tick path cannot tell it exists.
+        dev.weft.neoforge.observability.WeftObservability.onVanillaTickStart(
+                profiler.tickCounter());
 
         // Periodic P0 summary so headless/dedicated runs get data without /weft.
         // Built off-thread: buildReport() is thread-safe by design and costs
