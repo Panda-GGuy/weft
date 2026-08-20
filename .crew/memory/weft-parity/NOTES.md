@@ -2,11 +2,22 @@
 
 ## Standing notes
 - Full gametest suite (`./gradlew :weft-neoforge:runGameTestServer -PwithNeoForge`)
-  is the load-bearing hard gate: 24/24 required tests, ~2.3min, at HEAD (32e3300).
+  is the load-bearing hard gate: 24/24 required tests. After #10 harness fix,
+  two consecutive runs passed at `crew/parity-close` (2026-08-19/20).
 - Engine unit tests (`./gradlew :weft-engine:test`): 118 tests, 0 failures.
 - Both re-run clean 2026-08-19 as part of hazard 21-25 verification.
 
 ## Open threads
+- #3 hazard 21 stays open pending `p2navdefer`: door/Brain trigger, real
+  fan-out, deferred call observed after join on server thread.
+- #6 hazard 24 stays open pending `p2evictionchurn`: boundary block entity,
+  neighbour eviction, `unreadyUnits > 0`, `unmappedUnits == 0`, serial-tail
+  completion and zero worker guard trip.
+- #10 root-caused: parity harness rewound JVM-global entity numeric-id counter
+  while async chunk entity loads retained previously allocated ids. ChunkMap is
+  keyed by numeric id, so later replay collided despite distinct UUIDs. Fixed
+  by fixed per-scenario ids without rewinding allocator; production accessor
+  removed. Full report: `.crew/memory/_session/parity-issues-report.md`.
 - Hazards 19/20 (RFC-0006 default-ON exit criteria) not re-verified this pass -
   separate from 21-25, still gating default-ON along with soak/chaos/real-pack.
 - No CI gate for hazard 21 (door/Brain interaction) or hazard 24 (mid-section
@@ -31,3 +42,11 @@
   `.crew/memory/_session/parity-hazards-report.md`. Green gates != soak;
   did not run soak/chaos/real-pack this session - said so explicitly in the
   report and in each issue comment.
+- 2026-08-20: never rewind Minecraft's JVM-global entity-id allocator while
+  async chunk loads can be pending. Pin test entities directly before adding
+  them; keep allocator monotonic. `ChunkMap.addEntity` duplicate means numeric
+  id collision, not necessarily same UUID/entity.
+
+## Next
+- Q1/Q2: after increment-7 7c lands, add `p2fuse`; then build `p2navdefer` and
+  `p2evictionchurn` so #3/#6 can close honestly without lead intervention.
