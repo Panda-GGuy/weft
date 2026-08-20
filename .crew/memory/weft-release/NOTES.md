@@ -14,3 +14,4 @@
 - 2026-08-19: crew scaffold created; prefer durable notes here over chat history.
 - 2026-08-19: dated evidence must stay scoped to matrix that ran; distinguish original four-cell neighbor proof from current seven-cell workflow.
 - 2026-08-19: release workflow body had lagged from P1 shadow services to authoritative P1; audit tag-release copy alongside README status.
+- 2026-08-19: reverified all five workflow files parse; README claims match chaos (four torn saves), seven-cell R7 neighbors, and nightly/manual bench gates. Ignore probes cover nested harness logs without swallowing unrelated `.log` files.
