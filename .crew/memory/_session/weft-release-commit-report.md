@@ -4,6 +4,7 @@ Date: 2026-08-20
 Branch: `crew/release-hygiene`
 Commit: `e7f834f` (`docs(release): record equal-heap Stressmark tie`)
 Push: `origin/crew/release-hygiene` updated successfully
+Pull request: draft #19 (`https://github.com/Panda-GGuy/weft/pull/19`)
 
 ## Landed increment
 
@@ -33,6 +34,7 @@ Push: `origin/crew/release-hygiene` updated successfully
 - `git merge-tree $(git merge-base origin/main HEAD) origin/main HEAD`
 - `git commit -m "docs(release): pin stressmark evidence protocol"`
 - `git commit -m "docs(release): record equal-heap Stressmark tie"`
+- `gh pr create --draft --base main --head crew/release-hygiene ...`
 - `git push origin crew/release-hygiene`
 
 ## Leftover risks
@@ -49,8 +51,8 @@ Push: `origin/crew/release-hygiene` updated successfully
 
 ## Next owner
 
-- `weft-lead`: open/reconcile release-hygiene PR; branch is 16 commits behind
-  and 5 ahead of `origin/main`, with conflicts in shared memory/report files.
+- `weft-lead`: reconcile draft PR #19; branch is 16 commits behind and 5 ahead
+  of `origin/main`, with conflicts in shared memory/report files.
 - `weft-release`: fix `metrics-port` harness and RFC/README status drift on a
   current-main branch; avoid folding that code change into this docs branch.
 - `weft-parity`: current-head PR #14 rereview and named gates.
