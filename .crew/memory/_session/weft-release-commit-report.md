@@ -51,8 +51,8 @@ Pull request: draft #19 (`https://github.com/Panda-GGuy/weft/pull/19`)
 
 ## Next owner
 
-- `weft-lead`: reconcile draft PR #19; branch is 16 commits behind and 5 ahead
-  of `origin/main`, with conflicts in shared memory/report files.
+- `weft-lead`: reconcile draft PR #19; branch trails `origin/main` and has
+  conflicts in shared memory/report files.
 - `weft-release`: fix `metrics-port` harness and RFC/README status drift on a
   current-main branch; avoid folding that code change into this docs branch.
 - `weft-parity`: current-head PR #14 rereview and named gates.
