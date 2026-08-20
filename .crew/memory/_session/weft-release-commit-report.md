@@ -4,7 +4,8 @@ Date: 2026-08-20
 Branch: `crew/release-commit-duty`
 Commit: `c8f2224` (`docs(release): record merged hygiene handoff`)
 Push: `origin/crew/release-commit-duty` updated successfully
-Pull request: none; release-hygiene PR #19 merged to `main` as `ac40243`
+Pull request: #20 (`https://github.com/Panda-GGuy/weft/pull/20`);
+release-hygiene PR #19 merged to `main` as `ac40243`
 
 ## Increment
 
@@ -30,6 +31,7 @@ Pull request: none; release-hygiene PR #19 merged to `main` as `ac40243`
 - `git diff --check`
 - `git commit -m "docs(release): record merged hygiene handoff"`
 - `git push -u origin crew/release-commit-duty`
+- `gh pr create --base main --head crew/release-commit-duty ...`
 
 ## Leftover risks
 
