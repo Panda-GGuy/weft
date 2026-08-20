@@ -12,3 +12,6 @@ runs/
 # Local GameTest and lab-server harness output.
 gametest-*.log
 labserver-*.log
+
+# Crew session scratch (portable memories under .crew/memory/* stay tracked)
+.crew/memory/_session/
