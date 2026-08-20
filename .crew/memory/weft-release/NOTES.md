@@ -19,3 +19,7 @@
 - 2026-08-19: reverified all five workflow files parse; README claims match chaos (four torn saves), seven-cell R7 neighbors, and nightly/manual bench gates. Ignore probes cover nested harness logs without swallowing unrelated `.log` files.
 - 2026-08-20: PR #13/#14/#15 each had green PR build jobs (core, NeoForge build, informational engine benchmark), but build workflow does not run full GameTests, R7, chaos, or soak. PR #14 remains draft: latest head `1bf784c` attempts prior review blockers, but has no review on that head and its final full-suite rerun still failed before completion. PR #15 remains draft despite its branch report recording two local 24/24 GameTest passes.
 - 2026-08-20: added `scripts/lab/STRESSMARK.md`: exact pinned-seed, fresh-world OFF/ON worldgen protocol. `singleJoinTick`, entity sharding, and BE sharding remain OFF; ON engagement requires at least two live regions and nonzero worker/task engagement. This protocol cannot be cited as soak or default-ON clearance.
+- Commit-duty lesson: treat dirty shared memory and release evidence as one
+  bounded docs increment when they describe the same checkpoint; verify flag
+  names against `WeftConfig`, commit/push evidence first, then land a separate
+  ignored `_session` commit report so reported SHA and push result are exact.
