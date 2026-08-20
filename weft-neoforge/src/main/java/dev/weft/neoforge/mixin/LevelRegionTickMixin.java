@@ -6,7 +6,11 @@ import dev.weft.neoforge.regiontick.RegionizedBlockEntityTickMarker;
 import dev.weft.neoforge.regiontick.RegionizedTicking;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.entity.TickingBlockEntity;
 import org.spongepowered.asm.mixin.Mixin;
+
+import java.util.Collection;
 
 /**
  * P2 tick-ownership seam, block-entity half (RFC-0001 §11): the whole
@@ -21,6 +25,27 @@ import org.spongepowered.asm.mixin.Mixin;
  */
 @Mixin(Level.class)
 public abstract class LevelRegionTickMixin implements RegionizedBlockEntityTickMarker {
+
+    @WrapMethod(method = "addBlockEntityTicker")
+    private void weft$regionizeTickerAdd(TickingBlockEntity ticker,
+                                         Operation<Void> original) {
+        if ((Object) this instanceof ServerLevel serverLevel
+                && RegionizedTicking.captureFusedBlockEntityTicker(serverLevel,
+                        ticker, ticker::tick)) {
+            return;
+        }
+        original.call(ticker);
+    }
+
+    @WrapMethod(method = "addFreshBlockEntities")
+    private void weft$regionizeFreshBlockEntities(Collection<BlockEntity> fresh,
+                                                   Operation<Void> original) {
+        if ((Object) this instanceof ServerLevel serverLevel
+                && RegionizedTicking.captureFusedFreshBlockEntities(serverLevel, fresh)) {
+            return;
+        }
+        original.call(fresh);
+    }
 
     @WrapMethod(method = "tickBlockEntities")
     private void weft$ownBlockEntityTickSection(Operation<Void> original) {

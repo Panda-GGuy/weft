@@ -272,6 +272,72 @@ public class PartitionedTickingGameTests {
         });
     }
 
+    /** Increment-7 smoke gate: fused path engages and keeps two-island results equivalent. */
+    @GameTest(template = "empty", batch = "p2fuse", timeoutTicks = 1600)
+    public void fusedTickingIndependentIslands(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        BlockPos ground = WeftBenchGameTests.groundOrigin(helper);
+        BlockPos columnA = new BlockPos(ground.getX() - 64, 0, ground.getZ() + 64);
+        BlockPos columnB = new BlockPos(columnA.getX(), 0,
+                columnA.getZ() + ISLAND_GAP_CHUNKS * 16);
+        WeftBenchGameTests.forceChunks(level, columnA, true);
+        WeftBenchGameTests.forceChunks(level, columnB, true);
+        BlockPos baseA = surfaceBase(level, columnA);
+        BlockPos baseB = surfaceBase(level, columnB);
+
+        ActivationHooks.setActive(false);
+        PathfindingHooks.setActive(false);
+        SpawnDensityHooks.setActive(false);
+        RegionizedTicking.setActive(false);
+        LegacyRouting.setActive(false);
+
+        AtomicReference<String> controlA = new AtomicReference<>();
+        AtomicReference<String> controlB = new AtomicReference<>();
+        long[] baselines = new long[2];
+        helper.runAfterDelay(SETTLE_TICKS, () -> {
+            buildIsland(level, baseA);
+            buildIsland(level, baseB);
+        });
+        helper.runAfterDelay(SETTLE_TICKS + RUN_TICKS + 1, () -> {
+            controlA.set(furnaceDigest(level, furnacePos(baseA)));
+            controlB.set(furnaceDigest(level, furnacePos(baseB)));
+            demolishIsland(level, baseA);
+            demolishIsland(level, baseB);
+            buildIsland(level, baseA);
+            buildIsland(level, baseB);
+            baselines[0] = RegionizedTicking.fusedTicks();
+            baselines[1] = RegionizedTicking.fusedRegions();
+            RegionizedTicking.setActive(true);
+            RegionizedTicking.setPartitioned(true);
+            RegionizedTicking.setMailRouting(true);
+            RegionizedTicking.setSingleJoin(true);
+            RegionizedTicking.setParallel(true);
+        });
+        helper.runAfterDelay(SETTLE_TICKS + 2 * RUN_TICKS + 2, () -> {
+            String laneA = furnaceDigest(level, furnacePos(baseA));
+            String laneB = furnaceDigest(level, furnacePos(baseB));
+            long ticks = RegionizedTicking.fusedTicks() - baselines[0];
+            long regions = RegionizedTicking.fusedRegions() - baselines[1];
+            String[] threads = RegionizedTicking.lastEntityPartitionThreads();
+            String serverThread = level.getServer().getRunningThread().getName();
+            tearDown(level, baseA, baseB);
+            if (ticks < RUN_TICKS - 16 || regions < 2L * (RUN_TICKS - 16)) {
+                helper.fail("Vacuous fused run: " + ticks + " ticks / " + regions
+                        + " region tasks");
+            }
+            if (threads.length < 2 || Arrays.stream(threads)
+                    .anyMatch(thread -> thread == null || thread.equals(serverThread))) {
+                helper.fail("Fused parallel fan-out did not engage: " + Arrays.toString(threads));
+            }
+            if (!laneA.equals(controlA.get()) || !laneB.equals(controlB.get())) {
+                helper.fail("FUSED E1 EQUIVALENCE FAILURE\nA control=" + controlA.get()
+                        + " fused=" + laneA + "\nB control=" + controlB.get()
+                        + " fused=" + laneB);
+            }
+            helper.succeed();
+        });
+    }
+
     /**
      * Does increment 5 (parallel regions, already on main) survive block
      * entities that use NeoForge's <em>capability</em> path?
