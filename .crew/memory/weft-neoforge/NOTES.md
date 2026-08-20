@@ -14,3 +14,4 @@
 ## Lessons
 - 2026-08-19: crew scaffold created; prefer durable notes here over chat history.
 - 2026-08-19: MixinExtras `@WrapMethod` on `Level.addBlockEntityTicker` and `addFreshBlockEntities` applies fail-loud; a direct `BlockEntity.onLoad` wrap did not match NeoForge-transformed bytecode and was removed.
+- 2026-08-20: If global Gradle metadata is incomplete, a workspace-local `GRADLE_USER_HOME` avoids that cache fault, but verify free disk first; artifact resolution can otherwise fail before NeoForge compilation.
