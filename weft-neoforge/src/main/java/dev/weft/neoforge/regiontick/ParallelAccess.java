@@ -28,4 +28,32 @@ public final class ParallelAccess {
     public static boolean isRegionWorker() {
         return REGION_WORKER.get();
     }
+
+    // --- RFC-0006 hazard 22: border reads ---
+
+    private static final java.util.concurrent.atomic.LongAdder BORDER_READS =
+            new java.util.concurrent.atomic.LongAdder();
+
+    /**
+     * A worker resolved a chunk through the generated-FULL view because no
+     * promoted view was available yet (RFC-0006 hazard 22).
+     *
+     * <p>Counted rather than silent because hazard 4's guard used to make this
+     * a hard crash, and the concession that replaced it must stay visible: a
+     * <em>small, stable</em> count is the border ring being read as vanilla
+     * reads it, while a large or growing one is a worker reaching somewhere it
+     * should not — the bug hazard 4 was written to catch. Surfaced by
+     * {@code /weft status}.
+     */
+    public static void recordBorderRead() {
+        BORDER_READS.increment();
+    }
+
+    public static long borderReads() {
+        return BORDER_READS.sum();
+    }
+
+    static void resetBorderReads() {
+        BORDER_READS.reset();
+    }
 }

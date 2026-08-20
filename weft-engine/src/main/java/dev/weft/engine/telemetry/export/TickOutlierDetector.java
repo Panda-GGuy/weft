@@ -37,6 +37,7 @@ public final class TickOutlierDetector {
     private int next;
     private int sinceRefresh = REFRESH_TICKS;
     private long medianNanos;
+    private long meanNanos;
 
     /**
      * @param factor multiple of the rolling median above which a tick is an
@@ -66,6 +67,7 @@ public final class TickOutlierDetector {
         if (++sinceRefresh >= REFRESH_TICKS) {
             sinceRefresh = 0;
             medianNanos = computeMedian();
+            meanNanos = computeMean();
         }
         return medianNanos > 0 && filled >= REFRESH_TICKS
                 && tickNanos > medianNanos * factor;
@@ -74,6 +76,27 @@ public final class TickOutlierDetector {
     /** The current rolling median, in nanoseconds; 0 before the first refresh. */
     public long medianNanos() {
         return medianNanos;
+    }
+
+    /**
+     * The current rolling <em>mean</em>, in nanoseconds; 0 before the first
+     * refresh.
+     *
+     * <p>The median is the right baseline for outlier detection, for the reason
+     * this class's header gives: one GC pause drags a mean while barely moving a
+     * median. But it is the wrong basis for a <b>TPS</b> figure, and publishing
+     * TPS from it produced a concretely false reading — a live server with 45% of
+     * its ticks over 50 ms reported a flat 20 TPS, because its median tick landed
+     * just under budget. Overruns are exactly what a rate is supposed to include,
+     * so a rate needs the mean.
+     *
+     * <p>Both are exposed rather than one replacing the other: the median still
+     * drives outlier detection, and the pair together says something neither says
+     * alone — a mean far above the median means a minority of very slow ticks,
+     * while the two converging means a uniformly slow server.
+     */
+    public long meanNanos() {
+        return meanNanos;
     }
 
     public double factor() {
@@ -97,5 +120,17 @@ public final class TickOutlierDetector {
         long[] sorted = Arrays.copyOf(window, filled);
         Arrays.sort(sorted);
         return sorted[(sorted.length - 1) / 2];
+    }
+
+    /** Arithmetic mean over the same window, recomputed on the same schedule. */
+    private long computeMean() {
+        if (filled == 0) {
+            return 0L;
+        }
+        long sum = 0L;
+        for (int i = 0; i < filled; i++) {
+            sum += window[i];
+        }
+        return sum / filled;
     }
 }

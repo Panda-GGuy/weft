@@ -46,7 +46,7 @@ Consequences:
 | 1 | `ServerChunkCache.getChunk` — off-main calls `supplyAsync(mainThreadProcessor).join()` | **Deadlock**: main thread is parked at our barrier, the processor never runs | Worker read path: resolve via `getVisibleChunkIfPresent` → `ChunkHolder.getChunkIfPresent(FULL)`; the visible-chunk map is a volatile snapshot the parked main thread isn't mutating |
 | 2 | `ServerChunkCache` 4-slot `lastChunk` cache — mutated on every main-thread lookup | Torn (pos, status, chunk) triples if workers shared it | Worker path bypasses the cache entirely (no read, no store) |
 | 3 | `getChunkNow` off-main returns `null` | **Silent wrongness**: loaded chunks report as unloaded to workers | Same worker read path |
-| 4 | Unloaded-chunk access from a worker (vanilla would sync-load) | Would need main-thread chunk system | **Fail loud** with position forensics + counter. Ticket rings make this unreachable for in-region access; a trip is a real bug |
+| 4 | Unloaded-chunk access from a worker (vanilla would sync-load) | Would need main-thread chunk system | **Fail loud** with position forensics + counter. ~~Ticket rings make this unreachable for in-region access; a trip is a real bug~~ — **the premise is false; see hazard 22.** The guard is correct and the strategy stands; what was wrong is the claim that it is unreachable |
 | 5 | `Level.random` = `LegacyRandomSource` — `ThreadingDetector` throws (lines 34/45) | Hard crash on concurrent draw | Swap server levels to `ThreadSafeLegacyRandomSource` (same LCG, atomic seed — identical sequence single-threaded, worldgen-proven). Entity-path draws are 5 cosmetic sites (sound pitch ×4, fall-particle chance) → order-canonicalized under E1, digest-invisible |
 | 6 | `EntityTickList.active` — plain `Int2ObjectLinkedOpenHashMap` | Concurrent add/remove (spawn/death) corrupts | Synchronize add/remove/contains (iteration stays main-thread) |
 | 7 | `EntitySectionStorage.sections` + `sectionIds` (`Long2ObjectOpenHashMap` + `LongAVLTreeSet`) | Section-create on cross-section move races every entity query's read | Synchronize mutators **and** readers (coarse, correct; uncontended lock ≈ ns — shard later if the bench says so) |
@@ -70,6 +70,176 @@ by its own region, yet `getBlockEntity` is a **mutating** call and vanilla's
 own tick path invokes it constantly.
 
 | 18 | `Level.getBlockEntity` — **returns `null` outright when called off the server thread** (`!isClientSide && Thread.currentThread() != this.thread ? null : …`) | **Silent wrongness**: every neighbour lookup from a worker sees an empty world. Vanilla hoppers hit this every tick via NeoForge's `VanillaInventoryCodeHooks`, which turns the null into `new InvWrapper(null)` and throws on `getSlots()` | Region/shard workers take the real lookup (`LevelWorkerBlockEntityMixin`); non-worker off-thread callers keep vanilla's null |
+
+| 19..20 | *(candidates — see §3.1)* | | |
+
+| 21 | `ServerLevel.sendBlockUpdated` iterates `navigatingMobs` (ServerLevel:1078), a level-wide plain `ObjectOpenHashSet<Mob>` (ServerLevel:193) holding **every mob in the level, across every region**; `onTrackingStart`/`onTrackingEnd` add and remove from it (ServerLevel:1757/1784) on spawn, death and chunk load. The loop then calls `recomputePath()` on the mobs it selected | **Two races.** (a) Iterate-versus-mutate: any worker's block change iterates the set while another region's bucket adds or removes a mob, and fastutil answers with `NullPointerException: … "this.wrapped" is null` in `ObjectOpenHashSet$SetIterator.next`. Vanilla's guard here, `isUpdatingNavigations`, is a recursion check that assumes one thread. (b) Cross-region write: the loop mutates the `PathNavigation` of a mob in region B while region B's bucket is ticking it — forbidden outright by §2 | **Defer** (hazard 14's idiom): on a region worker the whole call enqueues to the section-end queue and runs on the server thread after the barrier, same tick, where the set has no concurrent mutator and touching any region's mobs is legal. Costs nothing observable — `sendBlockUpdated`'s client-visible half is `chunkSource.blockChanged`, and `ServerChunkCache.tick` broadcasts at ServerLevel:379, *before* the entity section at ServerLevel:420, so block changes made during entity ticking already broadcast on the following tick in unmodified vanilla. `ServerLevelNavigationDeferMixin` |
+
+| **22** | **Hazard 4's premise, and the worker read path's dependency on a parked thread.** `ChunkMap.prepareEntityTickingChunk` (ChunkMap:364) is `getChunkRangeFuture(holder, radius 2, ChunkStatus.FULL)`: vanilla guarantees that before a chunk ticks entities, every chunk within radius 2 is *generated* to `ChunkStatus.FULL`. But `ChunkStatus.FULL` (generation) and `FullChunkStatus.FULL` (promotion) are different things reached by different futures, and hazards 1–4's read path asked about **promotion** — whose continuation is scheduled onto `ChunkMap.mainThreadMailbox` (ChunkMap:704) | **Hard crash, deterministic.** During a fanned-out section the main thread is parked at our barrier and cannot drain that mailbox, so a border chunk's `fullChunkFuture` stays incomplete for exactly as long as the section runs. Every read into the border ring answered null and hazard 4's guard turned that into a crash: three consecutive boots, three different chunks, every one a short-reach read at a chunk boundary (`Entity.updateFluidHeightAndDoFluidPushing` → `getFluidState` ×2, `Mob.serverAiStep` → `getBlockState`). **This is hazard 1 wearing a different hat** — a dependency on a future only the parked main thread can complete — which is why it was deterministic rather than racy | **FIXED.** Answer the question vanilla's invariant actually guarantees: when no promoted view exists, fall back to the generated-`FULL` view if it is a real `LevelChunk`. That is the same object and the same block states the main thread would hand a vanilla caller reading the same border chunk — `replaceProtoChunk` (GenerationChunkHolder:90) rewrites every status future *except* the last, so the `FULL` future holds the `LevelChunk` and not an `ImposterProtoChunk`. Scoped to `getChunk(..., load=true)` **only**: `getChunkNow` is vanilla's "only if loaded" probe, whose null is a loadedness answer, and it never crashed so it has nothing to be rescued from. Beyond radius 2 a null still fails loud, and still should — that is a read vanilla would have had to sync-load, the real bug hazard 4 was written to catch. Border reads are counted and surfaced in `/weft status` |
+
+| **23** | **Nested `runOwnedParallel` into the same fixed-size pool.** There are exactly two call sites: `RegionizedTicking.runBuckets` (region buckets) and `BlockEntityShards.runColoured` (colour-pass tasks). With `parallelRegions` **and** `blockEntitySharding` both on, and a level with >=2 region buckets and a region over the 64-unit gate, the outer fan-out puts a bucket body **on a pool worker**, and that body submits the inner colour passes back into the same pool and blocks on `Future.get()` | **Permanent hang.** Not a crash, so no crash report is produced and the client only reports a dead internal server. Server thread parked in `WeftScheduler.awaitAll` under `tickBlockEntitySectionOwned`; every engine worker idle in `ForkJoinPool.awaitWork`; the **same awaited task object** across two jstack dumps taken minutes apart. Found on a live single-player world (Create + AE2 + Chunky) and then reproduced deterministically in the suite | **FIXED** by removing the nesting rather than trying to survive it: sharding stands down whenever the section fans out (`sharded && !(parallel && buckets.size() >= 2)`). This costs nothing, because RFC-0008 §1 already scopes sharding as "the solo-play lever, where region-level parallelism is a no-op because the world is one region" — if two regions are already fanning out, the worker threads are in use and intra-region sharding has nothing left to win. Flattening the colour passes into the outer barrier would let both engage at once; that is a throughput feature this design does not claim, and a bigger change than a hang deserves |
+
+### Hazard 23: what is proven, and what is not
+
+**Proven.** The combination hangs; the trigger is `parallelRegions` +
+`blockEntitySharding` with >=2 region buckets and a region over the sharding
+gate; and removing the nesting fixes it. That last one is not an inference — the
+new `p2combined` gate passes with the one-line fix and **hangs the entire
+gametest server without it**, twice, with a server-thread stack identical to the
+live report.
+
+**Not proven.** *Why the JDK never runs the awaited task.* The obvious story is
+pool starvation — workers blocked in nested joins with none left to run the inner
+tasks — and it is wrong, or at least incomplete: in both the live hang and the
+lab repro **every worker is idle in `awaitWork`, not blocked in `awaitDone`**.
+Nothing is running, nothing is queued, and the coordinator waits on a task no
+thread is contending for. A submission-signalling or task-loss interaction is the
+remaining candidate and it is not yet demonstrated.
+
+That distinction matters beyond bookkeeping. If the real mechanism is anything
+other than "not enough workers", then **any** nested `runOwnedParallel` is
+suspect, and the next increment that adds one — entity sharding is the obvious
+candidate (RFC-0008 §5) — cannot assume a bigger pool makes it safe. The
+standing rule until it is understood: **one level of submission per section.**
+
+### Hazard 23 and the third repetition of the same test-design gap
+
+`p2parallelbench` calls `setBlockEntitySharding(false)`. `p2shardbench` calls
+`setParallel(false)`. Each isolates its own mechanism so its number means
+something — correct benchmarking discipline, and the reason both stayed green
+through a deadlock that any run with both flags on would have hit immediately.
+Meanwhile `TESTBUILD-0001` shipped a config turning on both.
+
+This is the third instance in one day of the same shape — hazard 21 (no rig had
+`Brain` AI), hazard 22 (no rig changed chunk status mid-section), hazard 23 (no
+rig set two flags at once). The pattern is not "our rigs are bad"; each was
+built to prove one thing and did. The pattern is that **the untested case is the
+interaction**, and the shipped configuration is itself a claim that needs a gate.
+`p2combined` is that gate, and any future flag pairing the product ships
+together needs one too.
+
+| **24** | **Chunk residency is not guaranteed, only chunk promotion was.** `ChunkMap.prepareEntityTickingChunk` promises radius-2 at `ChunkStatus.FULL` *at the moment of promotion*; nothing keeps those neighbours resident afterwards. A ticket released by a teleport, or a pre-generator's sweep moving on, evicts them while the owning chunk keeps ticking | **Hard crash.** A ticking unit's short-reach read lands in an absent chunk, hazard 22's border fallback finds no generated view either, and the hazard 4 guard fires. Found by a player pressing teleport: a `minecraft:vault` at world x=2960 — the **westernmost block of chunk [185,188]** — ran `setChanged` → `updateNeighbourForOutputSignal` → `getBlockState` one block west into chunk [184,188], which had just been evicted. Vanilla survives this because `getChunk(load=true)` simply loads it again; a worker may not (hazard 1) | **FIXED** by the readiness gate hazard 22 deferred: a unit reaches a worker only when its **radius-1 read neighbourhood is presently live**, probed with `getChunkNow` (vanilla's own method on the server thread — a visible-map lookup, no load, no promotion) and cached per chunk per section, so the cost is nine lookups per *chunk* rather than per unit. Everything else goes to the existing serial tail, where a lazy load is legal. Radius 1 because that is what the failure reaches; beyond it the guard still fails loud, which is how the next gap announces itself |
+
+### Hazard 24 retires a hedge, and the counter that caught a second one
+
+Hazard 22's write-up named this fix and then declined it:
+
+> The fix is a region-readiness/border guarantee (a bucket may fan out only when
+> its region *and its read border* are live) … Rejected as unsound: … Needs its
+> own RFC.
+
+That was defensible when every observed failure was a chunk mid-promotion, which
+the cheaper border fallback covers. It stopped being defensible the moment a
+chunk turned out to be *absent* rather than *unpromoted*. The invariant is now
+implemented, scoped to radius 1 rather than the full border guarantee — narrower
+than the original proposal, and matched to the reach the crashes actually
+demonstrate.
+
+**And the gate's own first version broke a different signal.** Deferred units
+were routed to the serial tail, and the tail's accounting billed everything in it
+to `unmappedUnits` — an invariant that is supposed to stay 0, because a ticking
+chunk with no topology region is a bug. An eviction soak promptly reported
+**14,647 "unmapped" units**, which would have made the partition gate's
+`unmapped != 0` check meaningless on any world with chunk churn. Both populations
+are now counted at classification instead of by tail size: `unmappedUnits` stays
+0, and `unreadyUnits` carries the deferrals, where non-zero is expected and
+informative rather than alarming.
+
+**Verification.** 40 rounds of deliberate eviction churn — forceload a 6×6 chunk
+block, place hopper/chest/vault stacks on the westernmost block of its second
+chunk column, then unload the first column underneath them while sections run —
+across 8 regions with the fan-out engaged: **33,754 units deferred, 0 guard
+trips, 0 exceptions, 0 unmapped units**, clean shutdown. Suite 23/23 twice back
+to back, and the region-parallelism benchmark is unmoved (3.62x–3.87x section,
+2.70x–2.76x MSPT), because on a world whose chunks are not churning the readiness
+cache hits immediately.
+
+### A WS-7 metric that measured region ids
+
+Not a hazard, but found in the same session and worth recording because of *how*.
+`weft_block_entities_ticking` was built by summing
+`RegionizedTicking.lastBlockEntityPartition()` — an array of **region ids** — and
+publishing the total as a block-entity count. On a three-region world it read
+`6`, i.e. ids 1+2+3, while the level ticked thousands. The loop variable was
+named `units`, which is how a type-correct `long[]` carried the wrong meaning
+past review. The partitioner now reports its real captured unit count.
+
+The general lesson matches hazard 23's: it was noticed only because someone
+looked at the number on a real world and found it absurd. Both single-flag
+benchmarks and 23 gametests never read it.
+
+| **25** | **`Brain` AI reads remembered POSITIONS, at arbitrary range.** A `Brain` holds `HOME`, `JOB_SITE`, `MEETING_POINT`, `LIKED_NOTEBLOCK` and friends, and behaviours read the world at those positions directly rather than near the mob. `SleepInBed.checkExtraStartConditions` (SleepInBed:45) does a `getBlockState` at the villager's remembered bed — wherever it last slept | **Hard crash**, and one that hazard 24's fix cannot reach: that gate proves a *radius-1 neighbourhood* is live, the right bound for a block entity's neighbour-signal path and **no bound at all on a memory lookup**. The remembered chunk had been released by churn. Distinct class, not a tuning failure — *spatial gates cannot bound memory reads* | **FIXED** categorically rather than spatially: `MemoryReachEntities` lists the vanilla `Brain` users holding position memories, and the entity section routes them to the serial tail (server thread, where a lazy load is legal). Mirrors `WideReachBlockEntities`. Type-based rather than inspecting live memory sets, because those change at runtime — a mob safe to bucket on one tick would be unsafe the next — and the check would sit on the hot path. **Cost stated plainly:** listed types tick serially, so a village-heavy world loses the parallel win on villagers (2.7–4.7% of attributed cost on the motivating profile), visible in `unreadyUnits` rather than hidden |
+
+### Hazard 25, and the first one the lab found by itself
+
+Every hazard before this was found by a person playing. **This one was found by
+the soak**, fifteen minutes into the first run that combined real mods, Brain
+mobs and chunk churn in one world — which is the argument for
+`TESTING-0001`'s lab profile, made by the lab rather than about it.
+
+It also closes a loop opened deliberately. Hazard 24's note said the readiness
+gate was scoped to radius 1 because that is what the observed failures reached,
+and that **"beyond it the guard still fails loud, which is how the next gap will
+announce itself rather than corrupt something quietly."** The next gap announced
+itself the same evening, in exactly that way: fail-loud, with the offending call
+path in the stack. Scoping a fix to the evidence and leaving the guard armed
+beyond it worked as intended.
+
+**Verification.** The soak that crashed now runs to completion clean — 150
+cycles, 38,178 partitioned sections, 10 regions, 0 unmapped units, 0 domain
+trips, 0 exceptions, 52,692 units deferred. The `p2memoryreach` gate asserts the
+mechanism with two regions actually fanning out, and **fails without the fix**
+(`Only 0 units deferred, expected at least 480`). Suite 24/24.
+
+### Hazard 22's fix, and the counter that caught the first attempt
+
+The first version of the fix put the fallback in the shared resolve path, so
+`getChunkNow` started answering with generated-but-unloaded chunks — turning a
+null that callers read as "not loaded" into a lie. It was visible immediately:
+**8,260,234 border reads in thirty seconds** on a rig whose actual border ring
+is a few hundred chunks. Scoping the fallback to the `load=true` path dropped
+that to 21,712, a 380x reduction. The counter existed because hazard 4 used to
+make this case a hard crash and the concession replacing it had to stay
+visible; it paid for itself within one run.
+
+The counter also carries the fix's own evidence. On a steady-state world it
+stays flat — through 15 teleports and 106 rounds of forceload add/remove churn
+it did not move at all, because once promotion completes the promoted view is
+there and the fallback is never reached. It runs high only during **boot**
+(~400k–670k across the first seconds on the repro world), which is exactly the
+predicted shape: 560 zombies and 24 villagers all reading borders while a
+promotion backlog sits behind a main thread that parks once per section. A
+count that keeps climbing in steady state would mean a worker reaching
+somewhere it should not, i.e. the bug hazard 4 was written to catch, and that
+now shows up as a number instead of an outage.
+
+**Verification.** The world that crashed 3-for-3 now boots clean 3-for-3
+(`increment 5 parallel`, 5 regions, 0 unmapped units, 0 domain trips, clean
+shutdown), with the hazard 21 trigger — villagers and doors — present in it.
+A 106-round soak of teleports, forceload churn and mid-run zombie/villager
+spawns holds 9,122 partitioned sections and 16.2M sharded block-entity units
+with zero guard trips. Suite green 22/22.
+
+### How hazards 21 and 22 were found: nobody had run a live soak
+
+Both came out of the **first live-server soak with `parallelRegions` on** —
+about five minutes of it, on 2026-08-18. Neither is exotic. Hazard 21 is a
+villager opening a door; hazard 22 is a player walking away from spawn.
+
+The 22-test gametest suite was green, twice back to back, through both of
+them. That is the finding behind the finding. The rigs are synthetic in
+precisely the ways that hid these: they spawn zombies and passive mobs, so no
+`Brain`-based AI ever opened a door (hazard 21); and they forceload a fixed
+grid up front and never move a player, so chunk status never changes under a
+running section (hazard 22). Every rig was built to prove a specific mechanism
+and each one succeeded — while sharing an assumption none of them stated, that
+the world holds still.
+
+This is hazard 18's shape for the third time (§3's note, then §3.1's), and it
+should stop being a surprise: **a structure cleared by reasoning rather than by
+a rig that exercises it is where the next hazard lives** — and so is a rig
+whose world never changes shape. The live soak belongs in the exit criteria
+alongside the parity suite, not after it.
 
 ### How hazard 18 was found, and why it hid for two increments
 
@@ -192,3 +362,26 @@ does not flip default-ON with either still open. Exit criteria to default-ON
 remain: the
 full parity suite green at declared classes, chaos + R7 green, and the
 Create/AE2 soak clean under the flag.
+
+**Amended 2026-08-18 — hazard 22 found, then fixed; opt-in restored.** For a
+few hours this section read "experimental, throwaway worlds only": the first
+live soak crashed `parallelRegions` deterministically and no configuration made
+it safe. Root-causing it (see hazard 22 above) showed it was not the missing
+region-readiness invariant it first looked like, but hazard 1's problem in
+disguise — a worker read path waiting on a future only the parked main thread
+could complete — and that has a bounded fix. **Opt-in is usable again**, on the
+evidence in hazard 22's verification note. Default-ON still waits on 19 and 20.
+
+**And an exit criterion added 2026-08-18 after hazard 23: every combination the
+product ships must have a gate.** Isolating flags is right for benchmarks and
+insufficient for release confidence. `TESTBUILD-0001` ships `parallelRegions` and
+`blockEntitySharding` together, and that pairing deadlocked while both
+single-flag benchmarks stayed green. No configuration may be shipped as
+recommended unless some gate exercises it as shipped.
+
+**And a fourth exit criterion, from the same soak: a live-server soak.** The
+list above is entirely rig-based, and rigs are what missed hazards 21 and 22.
+A soak must run with a player joining, moving, teleporting and leaving, on a
+world with forceloaded chunks that contain entities, with `Brain`-based mobs
+(villagers) present — the three properties every existing rig lacks. Cheap to
+state, and it would have caught both findings in five minutes.

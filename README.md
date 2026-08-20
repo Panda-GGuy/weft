@@ -29,6 +29,22 @@ the testing playbook live on the
 | `weft-neoforge` | The actual mod: mixins, event bus adaptation, config | NeoForge 1.21.1 |
 | `weft-adapters` | Per-mod graph adapters (Create, AE2, …) | Planned (P3) |
 
+## Testing
+
+Three tiers, and the reasoning for them is in
+[TESTING-0001](docs/TESTING-0001-how-weft-gets-tested.md):
+
+```
+./gradlew :weft-neoforge:runGameTestServer -PwithNeoForge   # mechanism + combination gates
+scripts/lab/install-pack.sh <instance>                      # then a live soak, see scripts/lab
+```
+
+The gametests prove individual mechanisms and are fast. They are **not
+sufficient**: a green 23-test suite missed four crashes that two hours of
+ordinary play found, because every rig holds the world still with one flag on,
+and interactions plus moving worlds are what actually break. `scripts/lab` is
+the other half.
+
 ## Building
 
 Core (engine + api + sandbox — pure Java 21, no Minecraft):
@@ -45,8 +61,9 @@ Full build including the NeoForge mod (needs maven.neoforged.net):
 
 ## Status
 
-Pre-alpha. **P0 and P1 are complete; P2 is open** (regionized vanilla
-ticking + legacy lane, behind a flag — parity suite first, see below). What
+Pre-alpha. **P0 and P1 are complete; P2 is open** (regionized/partitioned
+ticking, parallel regions, owner mail, legacy lane, and block-entity sharding
+remain behind default-OFF flags — parity suite first, see below). What
 ships today: the engine core with a passing concurrency test suite, the
 **P0 profiler** (install on any stock server *or single-player world* and it
 measures how much of your pack's tick Weft could parallelize), and the
@@ -135,12 +152,13 @@ full three-phase protocol, locally (2026-08-17) and nightly via WS-8. Also
 landed: the RFC-0001 §12 **kill -9 during-save CI harness** (`chaos.yml` —
 dedicated server, forceloaded chunk plate, `save-all` then `kill -9` mid-save
 ×4, world must boot clean) and the **RFC-0003 R7 neighbor-boot matrix**
-(`neighbors.yml` — stub modids exercise cooperate/yield/refuse postures
-end-to-end, including Forgia/NeoFolia-class tick-ownership engines now
-seeded as `refuse` in the registry) — **both proven green on their first
+(`neighbors.yml` — seven cells exercise cooperate/yield/self-disable/refuse
+postures end-to-end, including Forgia/NeoFolia-class tick-ownership engines
+now seeded as `refuse` in the registry) — **both proven green on their first
 dispatched runs** (2026-08-17: chaos recovered cleanly from 4 kill -9 torn
-saves; all four neighbor cells asserted their postures) and nightly from
-here — plus a coexistence-policy fix the R7 work surfaced: **force-enable
+saves; the then-current four neighbor cells asserted their postures) and
+nightly from here — plus a coexistence-policy fix the R7 work surfaced:
+**force-enable
 can no longer out-rank a REFUSE** — R4 licenses overriding a yield, never
 an ownership conflict (unit-gated in `CoexistencePolicyTest`). Next increments (the legacy lane,
 parallel regions, WS-10 activation) each stay off until the parity suite is
@@ -245,9 +263,10 @@ new `p2parallel` hard gametest proves the E1 claim concrete — two islands,
 (thread-name probe), per-island end states **bit-identical** to the inline
 control. Honest scoping: barriered fan-out means async-service mail keeps
 applying at INGEST (with the main thread parked, global-inbox delivery *is*
-owner delivery); free-running regions with true mailbox rerouting, WS-10
-compounding inside big regions, and the long-tail soak (Create/AE2, chaos,
-R7 under the flag) are what stand between this and default-ON.
+owner delivery). Owner-mail routing and block-entity sharding have since
+landed behind default-OFF flags and their contract gates (RFC-0007 §3 and
+RFC-0008); the single-join region tick and long-tail soak (Create/AE2, chaos,
+R7 under the flags) still stand between this stack and default-ON.
 
 **RFC-0002/0003 workstreams started** (2026-08-16): every Weft optimization
 module now walks the [RFC-0003](docs/RFC-0003-coexistence-policy.md)
