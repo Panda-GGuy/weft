@@ -14,10 +14,11 @@ ticking + graph layer + legacy lane for unknown mods.
 - P2 open. Regionized/partitioned/parallel/owner-mail/BE-shard remain behind
   default-OFF flags.
 - Increment 6 owner-mail routing and increment 7 engine scaffold are on main.
-- Increment 7 loader fuse wiring is draft PR #14. CI is green, but parity review
-  blocks merge at `432f831`: fused hazard-24 work can run after failed readiness,
-  entity serial-tail ordering violates entity-before-BE semantics, and `p2fuse`
-  does not prove stage overlap or fallback paths.
+- Increment 7 loader fuse wiring is draft PR #14. Head `1bf784c` now routes
+  failed fused readiness through serial owner order and preserves
+  entity-before-BE ordering. CI is green, but parity re-review and deterministic
+  `p2fuse` overlap/pending/fallback evidence remain required; its full GameTest
+  runs still hit the known optional entity-tracker crash before suite completion.
 - P3+ not started (graph adapters, race detector, production tag).
 
 ## Current field evidence
@@ -34,8 +35,9 @@ ticking + graph layer + legacy lane for unknown mods.
 
 - #13 queue/project docs: superseded by this post-field reconciliation. Do not
   merge stale queue text; replace from lead docs or close as superseded.
-- #14 fused loader path: keep draft and default OFF; address review blockers,
-  rebase after #15, add deterministic gates, then rerun full suite twice.
+- #14 fused loader path: keep draft and default OFF. Re-review the `1bf784c`
+  ordering/readiness fix, add deterministic gates, rebase after #15, then rerun
+  the full suite twice.
 - #15 parity harness/accessor cleanup: first merge candidate. CI is green and
   report records two 24/24 suites. Rebase onto `d1095cc`, preserve focused code
   and parity notes, and drop stale shared queue copies superseded here.
@@ -45,7 +47,8 @@ ticking + graph layer + legacy lane for unknown mods.
 - #16 Moonrise + parallel worker crash: open; compat shipping gate.
 - #3 hazard 21: open pending non-vacuous `p2navdefer` evidence. Focused dirty
   work exists in parity worktree; do not overwrite it.
-- #6 hazard 24: open pending `p2evictionchurn`; also blocks PR #14 fused route.
+- #6 hazard 24: open pending non-vacuous `p2evictionchurn` evidence; PR #14's
+  code fix does not close the issue without that gate.
 - #10 closed by PR #15 harness fix, but change is not on main yet.
 - #4/#5/#7 closed.
 

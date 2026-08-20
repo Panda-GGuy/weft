@@ -14,8 +14,9 @@ enable any ownership/parallel flag.
    full-suite evidence review.
 3. Close #13 as superseded once replacement lead docs are reachable from main,
    or retarget #13 to contain only replacement docs. Do not merge old queue.
-4. Keep #14 draft. Rebase it after #15 only after three parity-review blockers
-   are fixed; drop its stale shared queue copies.
+4. Keep #14 draft. Re-review head `1bf784c`, which addresses fused readiness and
+   entity-before-BE ordering; finish deterministic gate evidence, then rebase it
+   after #15 and drop its stale shared queue copies.
 
 ## Parity handoff — READY
 
@@ -28,11 +29,13 @@ Worktree is dirty with focused #3 work; never reset or overwrite it.
 - Build `p2evictionchurn`: boundary BE, live then evicted neighbor, unrelated
   fan-out engaged, `unreadyUnits > 0`, `unmappedUnits == 0`, server-thread serial
   tail, zero guard trip.
-- Re-review #14 only after fixups. Required contract:
-  1. failed fused readiness routes BE/fresh work to actual serial tail;
-  2. every entity serial tail completes before any BE stage;
-  3. `p2fuse` deterministically proves cross-region stage overlap, pending-unit
-     behavior, and entity/BE fallback paths.
+- Re-review PR #14 head `1bf784c`: confirm failed fused readiness routes work in
+  serial owner order and every entity serial tail completes before any BE stage.
+  Extend `p2fuse` to deterministically prove cross-region stage overlap,
+  pending-unit behavior, and entity/BE fallback paths.
+- PR #14 full GameTest attempts still stop at the known optional
+  `parallelregionsentitysection` tracker crash. After #15 rebase/order cleanup,
+  rerun the full suite twice and record exact complete-suite evidence.
 - Preserve #15 fixed-ID harness cleanup. Rebase, run full GameTest suite twice,
   and record exact 24/24 evidence. Green CI compile/build is not soak.
 - Exit: #3/#6 close only with named non-vacuous gates; otherwise remain open.
@@ -78,7 +81,8 @@ supersede those copies during rebase—never reset blindly.
 
 ## Blocked follow-ons
 
-- #14 merge: blocked on parity review items above and #15 rebase order.
+- #14 merge: blocked on parity re-review, deterministic gates, complete full
+  suites, and #15 rebase order.
 - Real-pack soak: blocked on #16 shipping posture. Run without Moonrise only if
   evidence is explicitly scoped to that pack.
 - Default-ON discussion: blocked on all parity/compat/release exits, soak,

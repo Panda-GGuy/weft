@@ -15,17 +15,18 @@
   docs land.
 - #15 is first merge candidate after rebase onto `d1095cc`; preserve harness fix
   and parity report, drop stale shared queue copies.
-- #14 stays draft and parity-blocked at `432f831`. Required fixes: hazard-24
-  fused serial routing, entity-tail-before-BE ordering, deterministic overlap +
-  pending/fallback gates. Rebase after #15.
+- #14 stays draft and parity-blocked at `1bf784c`. Its latest patch addresses
+  fused serial routing and entity-tail-before-BE ordering; parity must re-review
+  those fixes and still require deterministic overlap/pending/fallback gates plus
+  two complete full-suite runs. Rebase after #15.
 - #10 is closed in tracker but fix is not on main until #15 lands.
 
 ## Open threads
 
 - #16 Moonrise + `parallelRegions` crash: compat must ship tested yield/refuse.
 - #3: dirty `p2navdefer` work exists in parity worktree; preserve it.
-- #6: `p2evictionchurn` remains required and PR #14 currently bypasses fused
-  readiness fallback.
+- #6: `p2evictionchurn` remains required; PR #14's readiness fallback patch is
+  code progress, not issue-closing evidence.
 - Release stays NOT READY until #3/#6/#16, corrected fusion contract,
   neighbor/chaos/R7, real-pack soak, and hazards 19/20 review clear.
 
@@ -48,6 +49,8 @@
   commits separately from lead-owned queue to avoid reviving stale priorities.
 - 2026-08-20: field compatibility evidence outranks planned optimization order;
   Moonrise shipping posture and fan-out honesty now precede soak claims.
+- 2026-08-20: when a blocked PR advances, queue memory must cite the reviewed
+  head and separate fixed code contracts from still-missing test evidence.
 
 ## Hard constraints
 
