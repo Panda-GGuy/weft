@@ -1,6 +1,6 @@
 # Release hygiene report
 
-Date: 2026-08-19
+Date: 2026-08-19 (reverified 2026-08-19)
 Branch: `crew/release-hygiene`
 Verdict: NOT READY
 
@@ -8,12 +8,15 @@ Verdict: NOT READY
 
 - Broadened root `.gitignore` from `gametest-run*.log` to `gametest-*.log` and added `labserver-*.log`. These patterns target root/local harness log names only; source files and nested build output remain unaffected.
 - Corrected README neighbor-matrix status: current workflow has seven cells and covers `SELF-DISABLED` as well as cooperate/yield/refuse. Kept the dated first-run claim explicit as the then-current four cells.
+- Corrected README and tag-release copy to match shipping flags: P1 services are authoritative/on by default, while implemented P2 ownership features remain default-off.
 
 ## Workflow/doc audit
 
 - `chaos.yml`: matches README claim. Nightly and manual workflow runs `scripts/chaos/kill-save-test.sh`; harness defaults to four `save-all`/`kill -9` iterations and requires a clean final recovery boot.
 - `neighbors.yml`: nightly and manual seven-cell matrix currently covers `spark`, `lithium`, `asyncpathfinding`, `servercore`, `scalablelux`, `metrics-port`, and `forgia`. README was stale at four cells and omitted the self-disable rung; fixed locally.
 - `bench.yml`: matches README claim. Nightly and manual jobs run engine/services JMH plus the NeoForge GameTest benchmark world, publish both series to `bench-data`, and set `fail-on-alert: true` at a `150%` alert threshold. World-bench also checks captured Prometheus exposition with `promtool`.
+
+All five workflow YAML files parse successfully in a static `PyYAML` check.
 
 ## Honest-status/flag audit
 
@@ -34,6 +37,8 @@ default-off.
 ## Verification
 
 - `git check-ignore -v --no-index gametest-foo.log gametest-run123.log labserver-foo.log` resolves all three through root `.gitignore`.
+- Nested probes (`src/gametest-example.log`, `src/labserver-example.log`) are also ignored; unrelated `real-source.log` is not, so the rule does not become a generic `*.log` ignore.
+- `git status --short --untracked-files=all` is clean; no user logs were deleted.
 - `git diff --check` passes.
 - Workflows were inspected statically; no nightly/manual workflow was dispatched and no full build was run because changes are ignore/docs/memory only.
 
