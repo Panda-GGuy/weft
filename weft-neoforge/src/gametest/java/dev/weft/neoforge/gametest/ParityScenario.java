@@ -1,6 +1,5 @@
 package dev.weft.neoforge.gametest;
 
-import dev.weft.neoforge.mixin.EntityCounterAccessor;
 import dev.weft.neoforge.parity.WorldDigest;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -36,9 +35,9 @@ import java.util.SplittableRandom;
  * block-entity ticking (hoppers, furnaces, comparators) — plus the block
  * updates they cause (redstone clocks, pistons, observers, flowing water).
  *
- * <p>Determinism controls (RFC-0005 §3): the level RNG is reseeded and the
- * global entity-id counter pinned before every build; every mob gets its own
- * seeded RNG after spawning; mobs are persistent, named, and penned; the
+ * <p>Determinism controls (RFC-0005 §3): the level RNG is reseeded and every
+ * scenario entity receives a fixed id before it enters the level; every mob
+ * gets its own seeded RNG after spawning; mobs are persistent, named, and penned; the
  * GameTest server already pins mob spawning, weather, random ticks, and fire
  * off. The scenario must prove its own determinism (two vanilla runs, equal
  * digests) before it is allowed to judge Weft — the control phase of
@@ -55,7 +54,7 @@ final class ParityScenario {
     private static final long LEVEL_RNG_SEED = 0x5EED_2001L;
     private static final long MOB_POS_SEED = 0x5EED_2002L;
     private static final long MOB_RNG_SEED_BASE = 0x5EED_2003L;
-    /** Far above anything another batch can have allocated (ids grow from 0). */
+    /** Far above anything the short-lived GameTest server can allocate naturally. */
     private static final int ENTITY_ID_BASE = 5_000_000;
 
     private static final int DEMOLISH_FLAGS =
@@ -119,9 +118,11 @@ final class ParityScenario {
             throw new IllegalStateException("parity arena base " + base + " is at/below the world "
                     + "floor - heightmap read before its chunk was loaded?");
         }
-        // Deterministic start line: pinned entity ids, reseeded level RNG,
-        // frozen midnight (daylight cycle already off).
-        EntityCounterAccessor.weft$entityCounter().set(ENTITY_ID_BASE);
+        // Deterministic start line: scenario-local entity ids, reseeded level
+        // RNG, frozen midnight (daylight cycle already off). Never rewind
+        // Entity.ENTITY_COUNTER: chunk entity deserialization is asynchronous,
+        // so a pending load can retain an id allocated before a rewind and
+        // later collide in ChunkMap with a newly allocated entity.
         level.random.setSeed(LEVEL_RNG_SEED);
         level.setDayTime(18000);
 
@@ -171,6 +172,7 @@ final class ParityScenario {
             ItemEntity item = new ItemEntity(level,
                     base.getX() + 21.5 + i, base.getY() + 0.9, base.getZ() + 10.5,
                     new ItemStack(Items.OAK_PLANKS), 0.0, 0.0, 0.0);
+            item.setId(ENTITY_ID_BASE + i);
             level.addFreshEntity(item);
         }
 
@@ -216,6 +218,7 @@ final class ParityScenario {
             double x = base.getX() + 25.5 + positions.nextDouble() * 11.0;
             double z = base.getZ() + 19.5 + positions.nextDouble() * 11.0;
             mob.moveTo(x, base.getY(), z, i * 36.0f, 0.0f);
+            mob.setId(ENTITY_ID_BASE + 5 + i);
             mob.setPersistenceRequired();
             mob.setCustomName(Component.literal("p2-" + (i % 2 == 0 ? "zombie" : "sheep") + "-" + i));
             if (!level.addFreshEntity(mob)) {

@@ -12,7 +12,6 @@
     "ServerLevelRegionTickMixin",
     "LevelRegionTickMixin",
     "LevelBlockEntityUnitMixin",
-    "EntityCounterAccessor",
     "parallel.ServerChunkCacheWorkerReadMixin",
     "parallel.LevelParallelSafetyMixin",
     "parallel.EntityTickListSyncMixin",

@@ -48,9 +48,10 @@ decision, not an accident:
 
 - **Entity ids and UUIDs.** Fresh every run. UUIDs are pure identity. Ids,
   however, *leak into behavior* wherever vanilla staggers per-entity work by
-  id — so ids are not digested but they ARE controlled: the harness pins the
-  global entity-id counter (`EntityCounterAccessor`) to a fixed base before
-  every run's spawns, making ids reproducible instead of merely ignored.
+  id — so ids are not digested but they ARE controlled: each scenario entity
+  receives an id from a fixed reserved range before it enters the level. The
+  JVM-global allocator is never rewound: async chunk loads may retain an id
+  allocated before a rewind and later collide with a newly allocated entity.
 - **Absolute game time.** Runs start at different `gameTime`s by construction
   (same world, sequential runs). Anything keyed to absolute time would
   spuriously differ, so entities are digested by explicit fields rather than
@@ -72,7 +73,7 @@ Weft:
 1. **Controlled sources.** The GameTest server already pins mob spawning,
    weather, random ticks, and fire off. The harness additionally reseeds
    `level.random` at every run start, seeds every spawned mob's own RNG,
-   pins the entity-id counter, freezes time at midnight, spawns mobs raw
+   pins scenario entity ids, freezes time at midnight, spawns mobs raw
    (no `finalizeSpawn` random rolls), makes them persistent and penned, and
    forces every other Weft optimization module inert so exactly one variable
    distinguishes the runs.
