@@ -221,6 +221,24 @@ public final class WeftConfig {
                     "the parity suite and the p2mail contract gate are green (RFC-0005).")
             .define("ownerMailRouting", false);
 
+    private static final ModConfigSpec.BooleanValue SINGLE_JOIN_TICK_SPEC = BUILDER
+            .comment("P2 increment 7 (RFC-0007 sec. 4, class E1): fuse each region's",
+                    "[owner-mail drain -> entity bucket -> block-entity bucket] into ONE",
+                    "uninterrupted worker task with a single join per level per tick,",
+                    "instead of a cross-region barrier at every vanilla section. Within a",
+                    "region, vanilla entity order then vanilla BE order is preserved",
+                    "(per-region digests bit-identical); only cross-region SECTION",
+                    "interleaving is added to the documented order-canonicalized set.",
+                    "SCAFFOLDING: the engine fused-task runner and per-region pending",
+                    "containers exist and are unit-tested, but the loader tick path does",
+                    "not route through them yet - enabling this arms the seam and its",
+                    "probes only, it changes no execution. Requires partitionedTicking",
+                    "AND ownerMailRouting (a fused task drains its region's mail as its",
+                    "first stage; without routing there is nothing correct to fuse).",
+                    "Ships off until the p2fuse gate (two-island free-of-each-other",
+                    "probe) and the parity suite are green (RFC-0005).")
+            .define("singleJoinTick", false);
+
     private static final ModConfigSpec.BooleanValue LEGACY_LANE_SPEC = BUILDER
             .comment("P2 (RFC-0001 sec. 7.2): extract Tier-2 (unverified) mods' entity and",
                     "block-entity tick work from the vanilla sections and run it in the",
@@ -365,6 +383,7 @@ public final class WeftConfig {
     public static volatile boolean BLOCK_ENTITY_SHARDING = false;
     public static volatile int BLOCK_ENTITY_SHARD_MIN_UNITS = 64;
     public static volatile boolean OWNER_MAIL_ROUTING = false;
+    public static volatile boolean SINGLE_JOIN_TICK = false;
     public static volatile boolean LEGACY_LANE = false;
     // WS-7 observability (RFC-0009 sec. 7)
     public static volatile boolean METRICS_ENABLED = false;
@@ -434,6 +453,7 @@ public final class WeftConfig {
         BLOCK_ENTITY_SHARDING = BLOCK_ENTITY_SHARDING_SPEC.get();
         BLOCK_ENTITY_SHARD_MIN_UNITS = BLOCK_ENTITY_SHARD_MIN_UNITS_SPEC.get();
         OWNER_MAIL_ROUTING = OWNER_MAIL_ROUTING_SPEC.get();
+        SINGLE_JOIN_TICK = SINGLE_JOIN_TICK_SPEC.get();
         LEGACY_LANE = LEGACY_LANE_SPEC.get();
         METRICS_ENABLED = METRICS_ENABLED_SPEC.get();
         METRICS_BIND_ADDRESS = METRICS_BIND_ADDRESS_SPEC.get();

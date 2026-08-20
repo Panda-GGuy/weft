@@ -70,6 +70,7 @@ public final class RegionizedTicking {
     private static volatile boolean partitioned;
     private static volatile boolean parallel;
     private static volatile boolean mailRouted;
+    private static volatile boolean singleJoin;
     private static volatile boolean sharded;
 
     /** One reserved engine owner id per live ServerLevel (increment 1's "one region"). */
@@ -199,6 +200,11 @@ public final class RegionizedTicking {
         parallel = partitioned && WeftConfig.PARALLEL_REGIONS;
         sharded = partitioned && WeftConfig.BLOCK_ENTITY_SHARDING;
         updateMailRouted(partitioned && WeftConfig.OWNER_MAIL_ROUTING);
+        // Increment 7 (RFC-0007 sec. 4): a fused task's first stage is its
+        // region's mail drain, so fusion without routing has nothing correct
+        // to fuse - the flag resolves against BOTH ancestors, the way
+        // parallel resolves against partitioned.
+        singleJoin = mailRouted && WeftConfig.SINGLE_JOIN_TICK;
     }
 
     /** Direct switch for tests (parity/partition gametests drive runs). */
@@ -208,6 +214,7 @@ public final class RegionizedTicking {
             partitioned = false;
             parallel = false;
             sharded = false;
+            singleJoin = false;
             updateMailRouted(false);
         }
     }
@@ -218,6 +225,7 @@ public final class RegionizedTicking {
         if (!partitioned) {
             parallel = false;
             sharded = false;
+            singleJoin = false;
             updateMailRouted(false);
         }
     }
@@ -240,6 +248,18 @@ public final class RegionizedTicking {
     /** Direct switch for tests; production resolution goes via applyActive. */
     public static void setMailRouting(boolean value) {
         updateMailRouted(value && partitioned);
+        if (!mailRouted) {
+            singleJoin = false;
+        }
+    }
+
+    /**
+     * Direct switch for tests; production resolution goes via applyActive.
+     * Increment 7 scaffolding: arming the seam requires the whole ancestor
+     * chain (active, partitioned, mail-routed) - see applyActive.
+     */
+    public static void setSingleJoin(boolean value) {
+        singleJoin = value && mailRouted;
     }
 
     /**
@@ -265,12 +285,23 @@ public final class RegionizedTicking {
         return mailRouted;
     }
 
+    /**
+     * Whether the single-join fused tick seam is armed (increment 7,
+     * RFC-0007 sec. 4). SCAFFOLDING: no tick-path behavior is keyed on this
+     * yet - it exists so the flag chain, its resolution and its status line
+     * ship (and are testable) ahead of the fused execution path.
+     */
+    public static boolean isSingleJoin() {
+        return singleJoin;
+    }
+
     /** Server stop: the level instances die with the server; drop their ids. */
     public static void reset() {
         // No flush: queued region mail targets state that is being torn down
         // with the server, exactly like the global inbox dying with the
         // scheduler (WeftMod.postToOwner's documented drop contract).
         mailRouted = false;
+        singleJoin = false;
         sharded = false;
         lastBlockEntityUnits = 0;
         sectionProbe = null;
@@ -771,6 +802,7 @@ public final class RegionizedTicking {
                         partitionedSections.sum(), unmappedUnits.sum(), lastEntityPartition.length)
                 : "increment 1 ticking (whole level, serial, server thread)";
         String mail = mailRouted ? "; " + OwnerMail.summary() : "";
+        String fuse = singleJoin ? "; single-join seam armed (scaffolding, no fused path yet)" : "";
         String shards = sharded ? "; " + BlockEntityShards.summary() : "";
         // Hazard 22's concession, kept in view: a small stable count is the
         // border ring being read as vanilla reads it; a growing one is a worker
@@ -781,7 +813,7 @@ public final class RegionizedTicking {
         String unreadyStr = unready == 0 ? "" : "; " + unready
                 + " units deferred (read neighbourhood not live)";
         return mode + ": " + sections + "; " + RegionTopology.summary()
-                + mail + shards + borderReads + unreadyStr;
+                + mail + fuse + shards + borderReads + unreadyStr;
     }
 
     private static long ownerId(ServerLevel level) {
