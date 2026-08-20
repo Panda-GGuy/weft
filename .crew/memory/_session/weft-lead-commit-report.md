@@ -1,22 +1,18 @@
 # weft-lead commit report
 
-- Branch: `crew/lead-plan`
-- SHA: `790958c`
+- Branch: `crew/lead-routing-recovery`
+- SHA: `61e9e2c53d822667007faadd0abd8d8450f75e46`
 - Commands run:
+  - `git -C C:\Users\Panda\weft status --short --branch`
+  - `git -C C:\Users\Panda\weft worktree list --porcelain`
   - `git fetch origin --prune`
-  - `gh pr view 14 --json number,title,state,isDraft,headRefName,headRefOid,baseRefName,mergeStateStatus,statusCheckRollup,url`
-  - `gh pr view 15 --json number,title,state,isDraft,headRefName,headRefOid,baseRefName,mergeStateStatus,statusCheckRollup,url`
-  - `gh issue view 3|6|10|16 --json number,state,title,url`
-  - lead-doc scope/content assertions — PASS
+  - PowerShell lead routing/content assertions — PASS
   - `git diff --check` — PASS
   - `git diff --cached --check` — PASS
+  - `git push -u origin crew/lead-routing-recovery` — PASS
 - Leftover risks:
-  - PR #14 remains draft and default OFF. Head `1bf784c` needs parity re-review,
-    deterministic `p2fuse` overlap/pending/fallback evidence, #15 rebase order,
-    and two complete full GameTest suites.
-  - Issues #3, #6, and #16 remain open. Release remains NOT READY.
-  - This path is ignored by default and is force-added as required session
-    evidence, so final pushed branch tip will differ from delivered increment
-    SHA above.
-- Next owner: `weft-parity` for PR #14 safety-contract review and named gates;
-  `weft-release` after #15/#14 order is reconciled.
+  - Assigned `C:\Users\Panda\weft-wt-lead` contains only ignored session scratch and is no longer a Git worktree. Recovery used fresh linked worktree `C:\Users\Panda\weft-wt-lead-recovery`.
+  - Main worktree remains mixed dirty. Code, compatibility config/tests, lab scripts/data, dashboard, watchdog runtime/config, and non-lead agent docs were not staged, reset, cleaned, or modified.
+  - Watchdog agent docs are durable, but runtime files `scripts/crew/*` and `.crew/watchdog.json` need separate owner review before commit.
+  - No feature default changed; P2 stays default OFF.
+- Next owner: watchdog/runtime owner for `scripts/crew/*` and `.crew/watchdog.json`; domain owners for remaining main-worktree code/config; lead may open or merge PR from this pushed branch.
