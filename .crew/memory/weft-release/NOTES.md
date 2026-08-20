@@ -13,6 +13,9 @@
 - Merge order checkpoint: #13 first; #15 only after draft removal/review; #14 last and only after current-head parity rereview plus non-vacuous fused/fallback gates. #14 head advanced from reviewed `432f831` to `1bf784c` with fallback-order fixes, so old review findings cannot be marked resolved without rereview. Current merge simulation found no textual conflicts, and all three carry identical shared PROJECT/BACKLOG/NEXT-QUEUE blobs.
 
 ## Lessons
+- 2026-08-20: fair equal-heap ON/OFF Stressmark is tied and must be archived as
+  field evidence, not as default-ON clearance. Keep ship posture NOT READY.
+  Prefer merge/close of docs PRs over leaving superseded open PRs around.
 - 2026-08-19: crew scaffold created; prefer durable notes here over chat history.
 - 2026-08-19: dated evidence must stay scoped to matrix that ran; distinguish original four-cell neighbor proof from current seven-cell workflow.
 - 2026-08-19: release workflow body had lagged from P1 shadow services to authoritative P1; audit tag-release copy alongside README status.
