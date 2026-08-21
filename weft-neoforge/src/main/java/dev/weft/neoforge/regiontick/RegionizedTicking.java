@@ -105,6 +105,8 @@ public final class RegionizedTicking {
     private static final LongAdder memoryReachUnits = new LongAdder();
     private static final LongAdder fusedTicks = new LongAdder();
     private static final LongAdder fusedRegions = new LongAdder();
+    /** Fused ticks that stood down from fan-out (fallback path engagement). */
+    private static final LongAdder fusedSerialFallbacks = new LongAdder();
 
     /** Region ids of the most recent partitioned sections (gametest probes). */
     private static volatile long[] lastEntityPartition = new long[0];
@@ -426,6 +428,7 @@ public final class RegionizedTicking {
         fusedFrames.clear();
         fusedUnits.clear();
         fusedTicks.reset();
+        fusedSerialFallbacks.reset();
         fusedRegions.reset();
     }
 
@@ -602,6 +605,14 @@ public final class RegionizedTicking {
             if (parallel && (MemoryReachEntities.isMemoryReach(entity)
                     || !readNeighbourhoodLive(level, chunk.x, chunk.z))) {
                 unreadyUnits.increment();
+                // Attribute the cause, not just the total. The partitioned path
+                // splits these out (memoryReachUnits) and the fused path did not,
+                // so a p2fuse gate asserting hazard 25 here would read zero and
+                // pass vacuously - the same defect the partitioned counters were
+                // split to prevent, reintroduced on the newer path.
+                if (MemoryReachEntities.isMemoryReach(entity)) {
+                    memoryReachUnits.increment();
+                }
                 // Fusion cannot move this entity to a post-join tail: an entity
                 // may register a BE that must tick in this tick's BE stage.
                 // Keep it in owner order and conservatively run the whole fused
@@ -774,6 +785,11 @@ public final class RegionizedTicking {
         // state remains one parallel task per region.
         boolean hasFresh = byRegion.values().stream().anyMatch(value -> !value.fresh.isEmpty());
         boolean runParallel = parallel && !frame.forceSerial && !hasFresh && byRegion.size() >= 2;
+        if (parallel && !runParallel) {
+            // Fan-out was configured but stood down this tick. Counted so the
+            // fallback path is provable rather than inferred from an absence.
+            fusedSerialFallbacks.increment();
+        }
         // Hazard 23: a fused outer task owns all stages. Never submit shard
         // work from that worker; only serial fusion may use the shard path.
         boolean shardThisTick = sharded && !runParallel && byRegion.size() == 1;
@@ -1007,6 +1023,11 @@ public final class RegionizedTicking {
         if (parallel && !readNeighbourhoodLive(level,
                 ticker.getPos().getX() >> 4, ticker.getPos().getZ() >> 4)) {
             unreadyUnits.increment();
+            // Hazard 24 own counter, same reason as the entity side: the
+            // conflated total cannot tell a block entity absent-neighbour
+            // deferral from an entity cause, so a fused hazard-24 gate needs
+            // this one or it asserts on a number it did not cause.
+            unreadyBlockEntityUnits.increment();
             // Same rule as unsafe entities: a post-join BE tail would break
             // entity-before-BE ordering. Stand down fan-out for this tick.
             // Collection is server-thread-only, so the frame is stable here.
@@ -1348,6 +1369,20 @@ public final class RegionizedTicking {
 
     public static long fusedRegions() {
         return fusedRegions.sum();
+    }
+
+    /**
+     * Fused ticks that STOOD DOWN from fan-out and ran the whole set on the
+     * server thread - readiness/hazard-25 deferral, fresh block-entity work, or
+     * a single region.
+     *
+     * <p>Exists because {@code fusedTicks}/{@code fusedRegions} cannot express
+     * it: both count a stood-down tick exactly like a fanned-out one, so a gate
+     * reading them proves the fused PATH ran, never that fan-out happened or
+     * that a fallback was taken. Both directions need their own number.
+     */
+    public static long fusedSerialFallbacks() {
+        return fusedSerialFallbacks.sum();
     }
 
     /**
