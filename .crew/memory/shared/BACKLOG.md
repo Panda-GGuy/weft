@@ -8,9 +8,16 @@
 - [x] #16 Moonrise posture MERGED (`72e4df7`), issue CLOSED (R7 cell + negative control)
 - [x] Parity GameTest suite gates every PR (#24, `17eb70f`) - previously nightly-only
 - [x] #15 MERGED (`65a727a`): `p2navdefer` + hazard-25 counter split; #3 CLOSED
-- [ ] NOW: review/land PR #25 (fan-out honesty; verified live in all 3 states)
-- [ ] NOW: build `p2evictionchurn` (#6) - the only open issue
-- [ ] NOW: rebase + re-review PR #14; non-vacuous fused gates, flag stays OFF
+- [x] PR #25 fan-out honesty MERGED (`7cbce4a`); verified live in all 3 states
+- [x] PR #27 MERGED (`30455f4`): `unreadyBlockEntityUnits` counter for hazard 24
+- [x] PR #14 rebased onto main (`4b26705`) and compiling; parity gate now judges it
+- [ ] NOW: #6 `p2evictionchurn` BLOCKED - 5 rigs failed on the precondition, not
+      the assertion. Vanilla guarantees radius-2 generated FULL around any
+      entity-ticking chunk, so a forced-grid gametest cannot make a neighbour
+      absent. Next: real ticket churn (moving player / Chunky sweep) or a soak
+      harness. Four rejected designs are in `weft-parity/NOTES.md` - read first.
+- [ ] NOW: PR #14 review - needs deterministic `p2fuse` overlap/pending/fallback
+      proof; flag stays OFF
 - [ ] READY: a world with `entity_buckets > 1` AND `owned parallel > 0`. No
       parallel-region win is claimable until one exists - every bench so far ran
       at 1 region, where parallelRegions is architecturally inert
