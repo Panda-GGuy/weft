@@ -150,6 +150,20 @@ public final class RegionizedTicking {
     private static final LongAdder unreadyUnits = new LongAdder();
 
     /**
+     * The BLOCK-ENTITY share of {@link #unreadyUnits} — hazard 24's own shape.
+     *
+     * <p>Split out for the same reason {@link #memoryReachUnits} was: the total
+     * is incremented from three sites (memory-reach entities, entities whose
+     * read neighbourhood is not live, and block entities in that state), so it
+     * can only ever prove the union. Hazard 24 is specifically <em>a block
+     * entity on a chunk boundary reading into an evicted neighbour</em>, and a
+     * gate for it must not be satisfiable by an entity deferral in the same
+     * tick — least of all in a rig that deliberately evicts chunks, where
+     * entity deferrals are abundant.
+     */
+    private static final LongAdder unreadyBlockEntityUnits = new LongAdder();
+
+    /**
      * RFC-0006 <b>hazard 24</b>: may a worker be handed a unit in this chunk?
      *
      * <p>Answers "is this chunk's radius-1 read neighbourhood <em>presently</em>
@@ -328,6 +342,7 @@ public final class RegionizedTicking {
         readyCache = null;
         unreadyUnits.reset();
         memoryReachUnits.reset();
+        unreadyBlockEntityUnits.reset();
         ParallelAccess.resetBorderReads();
         BlockEntityShards.reset();
         ownerIds.clear();
@@ -748,6 +763,9 @@ public final class RegionizedTicking {
             // Hazard 24: this is the exact shape that crashed - a block entity
             // whose one-block neighbour read crosses into an evicted chunk.
             unreadyUnits.increment();
+            // Counted on its own too: the p2evictionchurn gate must be able to
+            // assert THIS cause, not the union the total represents.
+            unreadyBlockEntityUnits.increment();
             beTail.add(unit);
         } else {
             // Type lookup goes through the live block entity: a removed
@@ -814,6 +832,14 @@ public final class RegionizedTicking {
      */
     public static long memoryReachUnits() {
         return memoryReachUnits.sum();
+    }
+
+    /**
+     * The block-entity share of {@link #unreadyUnits()} — hazard 24's own
+     * shape, for a gate that must prove that cause rather than the union.
+     */
+    public static long unreadyBlockEntityUnits() {
+        return unreadyBlockEntityUnits.sum();
     }
 
     /** Region ids of the most recent partitioned entity section (probe). */
