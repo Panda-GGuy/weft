@@ -1,6 +1,7 @@
 # Shared project memory
 
-Last updated: 2026-08-20 (lead reconciliation against `origin/main` `d1095cc`)
+Last updated: 2026-08-20 (commit-duty reconciliation against `origin/main`
+`ac40243` and open PR heads)
 
 ## What Weft is
 
@@ -14,7 +15,8 @@ ticking + graph layer + legacy lane for unknown mods.
 - P2 open. Regionized/partitioned/parallel/owner-mail/BE-shard remain behind
   default-OFF flags.
 - Increment 6 owner-mail routing and increment 7 engine scaffold are on main.
-- Increment 7 loader fuse wiring is draft PR #14. Head `1bf784c` now routes
+- Increment 7 loader fuse wiring is draft PR #14. Head `97b9254` contains code
+  head `1bf784c`, which routes
   failed fused readiness through serial owner order and preserves
   entity-before-BE ordering. CI is green, but parity re-review and deterministic
   `p2fuse` overlap/pending/fallback evidence remain required; its full GameTest
@@ -35,21 +37,25 @@ ticking + graph layer + legacy lane for unknown mods.
 
 - #13 queue/project docs: superseded by this post-field reconciliation. Do not
   merge stale queue text; replace from lead docs or close as superseded.
-- #14 fused loader path: keep draft and default OFF. Re-review the `1bf784c`
+- #14 fused loader path: keep draft and default OFF. Branch head is `97b9254`;
+  re-review code head `1bf784c`
   ordering/readiness fix, add deterministic gates, rebase after #15, then rerun
   the full suite twice.
-- #15 parity harness/accessor cleanup: first merge candidate. CI is green and
-  report records two 24/24 suites. Rebase onto `d1095cc`, preserve focused code
-  and parity notes, and drop stale shared queue copies superseded here.
+- #15 parity/harness cleanup: branch head `7423942` is green in PR build CI and
+  records one complete 25/25 local GameTest suite with non-vacuous `p2navdefer`
+  evidence. Issue #3 remains open until review/landing. Before merge, drop stale
+  shared `PROJECT.md`/`BACKLOG.md` copies and review focused code against main.
 
 ## Open issues
 
 - #16 Moonrise + parallel worker crash: open; compat shipping gate.
-- #3 hazard 21: open pending non-vacuous `p2navdefer` evidence. Focused dirty
-  work exists in parity worktree; do not overwrite it.
+- #3 hazard 21: open. PR #15 head `7423942` now carries non-vacuous
+  `p2navdefer` evidence and one 25/25 full suite; review and land before tracker
+  closure.
 - #6 hazard 24: open pending non-vacuous `p2evictionchurn` evidence; PR #14's
   code fix does not close the issue without that gate.
-- #10 closed by PR #15 harness fix, but change is not on main yet.
+- #10/#11 closed; PR #15 still carries related harness/accessor cleanup not yet
+  on main.
 - #4/#5/#7 closed.
 
 ## Release posture

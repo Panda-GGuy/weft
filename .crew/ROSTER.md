@@ -29,6 +29,7 @@ Live pins: `.crew/ROUTING.md` (capability matrix)
 | `weft-compat` | Tiers, legacy, neighbors | PLAN `cc/claude-sonnet-5` |
 | `weft-api` | Public API | CODE `cc/claude-fable-5` |
 | `weft-release` | Gradle/CI/ship checklist | DS_FLASH `ds/deepseek-v4-flash` |
+| `weft-watchdog` | Stall/crash monitor + bounded restart | CODEX `cx/gpt-5.6-sol-high` |
 
 ## On-demand
 

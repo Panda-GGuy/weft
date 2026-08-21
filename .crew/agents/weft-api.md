@@ -3,7 +3,8 @@
 ## Model
 - Mode: **coding**
 - Primary: `cc/claude-fable-5` (CODE / Fable 5)
-- Fallback: `cx/gpt-5.6-sol-high` -> `cc/claude-opus-5` -> `xao/grok-4.5`
+- Fallback: `cc/claude-opus-5` -> `cx/gpt-5.6-sol-high` -> `xao/grok-4.5`
+- On Fable rate limit/quota/429/outage: checkpoint dirty state, switch to Opus immediately, resume; never stop waiting for Fable
 - See: .crew/ROUTING.md capability matrix
 
 Public API surface for mods and adapters.

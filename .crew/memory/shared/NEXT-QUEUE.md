@@ -1,6 +1,7 @@
 # Next queue (lead-owned)
 
-Last updated: 2026-08-20 (PR #13/#14/#15 + field reconciliation)
+Last updated: 2026-08-20 (commit-duty reconciliation at `origin/main`
+`ac40243`)
 
 Pick highest READY packet for role. Preserve dirty worktrees. Do not default
 enable any ownership/parallel flag.
@@ -9,9 +10,11 @@ enable any ownership/parallel flag.
 
 1. DONE: PR #17 merged to main (`1102584`).
 2. DONE: PR #13 closed as superseded by #17.
-3. DONE: PR #15 rebased onto current main; keep draft until full-suite evidence
-   and review of current head. Drop any remaining stale shared queue blobs.
-4. Keep #14 draft. Re-review current head after #15 lands; require non-vacuous
+3. PR #15 remains draft at `7423942`. Its report records one 25/25 full suite
+   and non-vacuous `p2navdefer`; review focused code, remove stale shared
+   `PROJECT.md`/`BACKLOG.md` copies, then decide issue #3 and merge readiness.
+4. Keep #14 draft at `97b9254` (code head `1bf784c`). Re-review after #15
+   lands; require non-vacuous
    fused/fallback gates and full GameTest isolation of tracker crash.
 5. Cleanup DONE for merged remotes: deleted `crew/lead-plan`, `crew/engine-inc7`,
    `feat/p2-parallel-regions-throughput`, `feat/ws7-observability-exporter`,
@@ -20,11 +23,11 @@ enable any ownership/parallel flag.
 ## Parity handoff — READY
 
 Branch/worktree: `crew/parity-close` / `C:\Users\Panda\weft-wt-parity`.
-Worktree is dirty with focused #3 work; never reset or overwrite it.
+Worktree is clean and pushed at `7423942`; preserve it.
 
-- Finish `p2navdefer`: real fan-out, villager/door navigation trigger, deferred
-  call observed after fused/section join on server thread. Current dirty patch
-  adds counters/probe but needs build and non-vacuous GameTest proof.
+- Review pushed `p2navdefer` evidence: one full suite passed 25/25 and required
+  batch engaged. Confirm probe contract is sufficient, then close #3 only after
+  focused code lands; otherwise record exact missing proof.
 - Build `p2evictionchurn`: boundary BE, live then evicted neighbor, unrelated
   fan-out engaged, `unreadyUnits > 0`, `unmappedUnits == 0`, server-thread serial
   tail, zero guard trip.
@@ -35,8 +38,9 @@ Worktree is dirty with focused #3 work; never reset or overwrite it.
 - PR #14 full GameTest attempts still stop at the known optional
   `parallelregionsentitysection` tracker crash. After #15 rebase/order cleanup,
   rerun the full suite twice and record exact complete-suite evidence.
-- Preserve #15 fixed-ID harness cleanup. Rebase, run full GameTest suite twice,
-  and record exact 24/24 evidence. Green CI compile/build is not soak.
+- Preserve #15 fixed-ID harness cleanup. Current report records one 25/25 full
+  suite; add another clean full-suite run if reviewer keeps two-run gate. Green
+  CI compile/build is not soak.
 - Exit: #3/#6 close only with named non-vacuous gates; otherwise remain open.
 
 ## Compatibility handoff — READY
@@ -60,12 +64,13 @@ branch without resetting existing changes.
 
 ## Release handoff — READY
 
-Branch/worktree: `crew/release-hygiene` / `C:\Users\Panda\weft-wt-release`.
-It has old shared-memory dirt copied from pre-field queue; preserve then drop or
-supersede those copies during rebase—never reset blindly.
+PR #19 is merged at `ac40243`. Follow-up PR #20 is clean and green at `8b01f7a`
+on branch/worktree `crew/release-commit-duty` /
+`C:\Users\Panda\weft-wt-release2`.
 
-- Reconcile PRs in merge order above. Remove duplicated stale shared docs from
-  #15/#14 rather than resolving them by taking old branch versions.
+- Reconcile PRs in merge order above. PR #20 is reviewable lead/release memory;
+  remove duplicated stale shared docs from #15 rather than taking old branch
+  versions.
 - Refresh README/RFC status: #10 fixed on #15 but not main; #3/#6/#16 open; #14
   draft and parity-blocked; all P2 ownership flags default OFF.
 - Document reproducible ON/OFF field protocol: same world recreation, mod list,
