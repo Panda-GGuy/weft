@@ -44,6 +44,19 @@
 
 ## Lessons
 
+- 2026-08-20: the project's hard correctness gate (RFC-0005 parity suite) ran
+  ONLY on the 03:17 nightly, so PRs merged against three green checks with the
+  gate unrun. Fixed in #24. Generalise: when a project names a "hard gate",
+  verify which trigger actually runs it. A checks list that omits the gate reads
+  greener than the change is, and the cost is paid on a commit already in main.
+- 2026-08-20: merge order matters for evidence, not just conflicts. Landing the
+  CI gate (#24) BEFORE the parity PR (#15) meant #15 was validated by the gate
+  it justified, on CI hardware, instead of only on my machine.
+- 2026-08-20: review your own staged work as if someone else wrote it. Two real
+  defects were caught this way - a counter asserted for a cause it cannot prove
+  (#15) and a status line printed twice in the one state that matters (#25) -
+  both in code that already compiled and passed.
+
 - 2026-08-19: crew scaffold created; prefer durable notes here over chat history.
 - 2026-08-20: provider limits are route failures. Checkpoint dirty state and
   checks, then walk `.crew/ROUTING.md`; never wait by abandoning work.
