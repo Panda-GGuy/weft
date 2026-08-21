@@ -204,7 +204,44 @@ public final class WeftModules {
         // metric should list modules in the same order the table prints them.
         lastResolutions = java.util.Collections.unmodifiableMap(resolved);
         resolvedOnce = true;
+        lines.addAll(disarmedSubFlagLines(resolved));
         return lines;
+    }
+
+    /**
+     * Issue #16. A yielded or disabled module's sub-flags are silently inert:
+     * {@code parallelRegions}/{@code partitionedTicking} only ever resolve as
+     * {@code regionized_ticking && flag}, so an operator who set them in
+     * {@code weft-common.toml} and then installed a neighbor Weft yields to
+     * would read their own config as proof of something that cannot happen.
+     *
+     * <p>R5's promise is that nobody needs a debugger to find out what a module
+     * is doing, and "your parallel flag is set but architecturally cannot
+     * engage" is exactly that class of confusion. One extra line, only when the
+     * contradiction is real — and it is what the R7 {@code moonrise} cell greps
+     * to prove the crash path is disarmed rather than merely re-labelled.
+     */
+    private static List<String> disarmedSubFlagLines(Map<String, String> resolved) {
+        String state = resolved.get("regionized_ticking");
+        if ("ACTIVE".equals(state) || state == null) {
+            return List.of();
+        }
+        List<String> set = new ArrayList<>();
+        if (WeftConfig.PARTITIONED_TICKING) {
+            set.add("partitionedTicking");
+        }
+        if (WeftConfig.PARALLEL_REGIONS) {
+            set.add("parallelRegions");
+        }
+        if (WeftConfig.BLOCK_ENTITY_SHARDING) {
+            set.add("blockEntitySharding");
+        }
+        if (set.isEmpty()) {
+            return List.of();
+        }
+        return List.of("  regionized_ticking is " + state + ", so its sub-flags are DISARMED: "
+                + String.join(", ", set)
+                + " set in config but no Weft worker fan-out can engage.");
     }
 
     /** Startup entry point (R5: the one-glance report, logged once). */

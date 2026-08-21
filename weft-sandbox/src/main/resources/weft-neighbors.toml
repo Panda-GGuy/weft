@@ -104,6 +104,17 @@ activation = "yield"
 # the other. Unlike `activation` above, this overlap is unconditional.
 spawn_density = "yield"
 
+# Moonrise (chunk system / mid-tick main-thread tasks). Field crash 2026-08-19
+# under parallelRegions: Moonrise TickThread.ensureTickThread fired from a Weft
+# ForkJoin worker during entity section (Cannot execute main thread task
+# off-main). Until a real coexistence design exists, yield region ownership so
+# P1 services can still run beside Moonrise. P0 profiler still cooperates.
+[moonrise]
+profiler = "cooperate"
+regionized_ticking = "yield"
+entity_sharding = "yield"
+legacy_lane = "yield"
+
 [scalablelux]
 # modid from src/main/resources/fabric.mod.json on RelativityMC/ScalableLux
 # branch ver/1.21.1 (MC 1.21.1, LGPL-3.0-only). NeoForge 1.21.1 exists as

@@ -48,6 +48,21 @@ jobs:
             # regionized_ticking posture is deliberately unset pending RFC-0006's
             # light-engine audit item; extend this cell when either lands.
             expectations: 'profiler +ACTIVE|cooperating with scalablelux|spawn_density +ACTIVE'
+          - neighbor: moonrise
+            # Rung 2, issue #16. Moonrise's chunk-system rewrite asserted
+            # main-thread execution from a Weft ForkJoin worker during a
+            # parallel entity section and crashed the tick loop. Moonrise makes
+            # no tick-ownership claim of its own (RESEARCH-0002 §1), so this is
+            # a yield, not a refusal - and the point of the cell is the SECOND
+            # and THIRD expectations, not the first: the config below asks for
+            # the full parallel stack, and the boot must show it disarmed. A
+            # posture line alone would not distinguish "Weft parked the module"
+            # from "Weft relabelled it while workers still tick entities".
+            expectations: 'regionized_ticking +YIELDED|to moonrise|sub-flags are DISARMED|parallelRegions'
+            weft_config: |
+              regionizedTicking = true
+              partitionedTicking = true
+              parallelRegions = true
           - neighbor: metrics-port
             # WS-7 / RFC-0009 §8.1. The only real conflict the observability
             # module has with a neighbouring exporter is a PORT COLLISION, and a
