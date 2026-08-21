@@ -56,6 +56,19 @@
   defects were caught this way - a counter asserted for a cause it cannot prove
   (#15) and a status line printed twice in the one state that matters (#25) -
   both in code that already compiled and passed.
+- 2026-08-20: a gate that cannot reach its own PRECONDITION is worth abandoning,
+  not weakening. Five `p2evictionchurn` rigs failed identically on "neighbour is
+  resident" (#6) because vanilla guarantees radius-2 generated FULL around any
+  entity-ticking chunk - a ticking rig keeps its own neighbourhood loaded by
+  construction. Landed the counter the gate would need, wrote the four rejected
+  designs into parity NOTES, left the issue open. An open issue is honest about
+  coverage; a relaxed assertion is not.
+- 2026-08-20: when resolving an additive rebase conflict, do NOT strip markers
+  mechanically. One inc7 hunk split a METHOD BODY rather than sitting between
+  declarations, so dropping markers also dropped a closing brace and nested the
+  next method inside it. Compile after every conflict resolution, and be aware
+  the same damaged block can appear twice - the first `replace_string` fixed a
+  different copy than the compiler was complaining about.
 
 - 2026-08-19: crew scaffold created; prefer durable notes here over chat history.
 - 2026-08-20: provider limits are route failures. Checkpoint dirty state and
