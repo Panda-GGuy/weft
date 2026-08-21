@@ -57,6 +57,15 @@ public final class WeftCommands {
         for (String line : dev.weft.neoforge.coexist.WeftModules.resolve()) {
             source.sendSuccess(() -> Component.literal(line), false);
         }
+        // Field-bench line: multi-region topology is NOT parallel fan-out.
+        // Operators (and this project's own 2026-08-20 bench notes) kept reading
+        // "4 regions" as "workers busy" while owned-parallel sections stayed 0,
+        // which is how a tied result gets written up as a win. Its own line, for
+        // every module state, so it is also visible when the module is yielded
+        // or off - those are the states where the confusion is worst.
+        source.sendSuccess(
+                () -> Component.literal("  " + dev.weft.neoforge.regiontick.RegionizedTicking.fanOutEvidence()),
+                false);
         return Command.SINGLE_SUCCESS;
     }
 

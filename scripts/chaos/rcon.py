@@ -41,7 +41,16 @@ def main():
             return 2
         send_packet(sock, 2, 2, command)  # SERVERDATA_EXECCOMMAND
         _, _, response = read_packet(sock)
-        print(response)
+        # Stressmark (and others) emit unicode bars; Windows cp1252 consoles
+        # blow up on print. Prefer UTF-8 stdout; fall back to replace.
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+        try:
+            print(response)
+        except UnicodeEncodeError:
+            sys.stdout.buffer.write(response.encode("utf-8", "replace") + b"\n")
     return 0
 
 
