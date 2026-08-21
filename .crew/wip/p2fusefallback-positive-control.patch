@@ -1,0 +1,140 @@
+--- a/weft-neoforge/src/gametest/java/dev/weft/neoforge/gametest/PartitionedTickingGameTests.java
++++ b/weft-neoforge/src/gametest/java/dev/weft/neoforge/gametest/PartitionedTickingGameTests.java
+@@ -403,12 +403,137 @@
+             }
+             helper.succeed();
+         });
+     }
+ 
+     /**
++     * POSITIVE CONTROL for {@code fusedSerialFallbacks} (RFC-0007 sec. 4).
++     *
++     * <p>The p2fuse gate asserts that fan-out was SUSTAINED by computing
++     * {@code fannedOut = fusedTicks - fusedSerialFallbacks}. In a healthy rig
++     * the fallback counter reads zero for every tick - which means that
++     * assertion is indistinguishable from one where the counter is simply
++     * BROKEN and can never increment. A gate whose subtrahend is always zero
++     * is not measuring anything; it silently degrades into the vacuous-run
++     * guard that already exists next to it.
++     *
++     * <p>So this test forces the stand-down instead of hoping for it. With
++     * fused parallel ticking already engaged and fanning out, it places a NEW
++     * furnace: a fresh block entity makes {@code hasFresh} true, and the fused
++     * path deliberately keeps such ticks on the server thread (NeoForge
++     * {@code onLoad} may mutate level-wide structures). Asserted:
++     * <ol>
++     *   <li>fan-out was engaged BEFORE the disturbance - otherwise there is no
++     *       stand-down to observe, only an absence;</li>
++     *   <li>the counter moved at least once after it;</li>
++     *   <li>the stand-down was TRANSIENT - fan-out resumed, so the counter is
++     *       tracking a per-tick decision rather than latching.</li>
++     * </ol>
++     * Together these make the p2fuse subtraction load-bearing.
++     */
++    @GameTest(template = "empty", batch = "p2fusefallback", timeoutTicks = 1600)
++    public void fusedSerialFallbackIsObservable(GameTestHelper helper) {
++        ServerLevel level = helper.getLevel();
++        BlockPos ground = WeftBenchGameTests.groundOrigin(helper);
++        BlockPos columnA = new BlockPos(ground.getX() - 128, 0, ground.getZ() + 128);
++        BlockPos columnB = new BlockPos(columnA.getX(), 0,
++                columnA.getZ() + ISLAND_GAP_CHUNKS * 16);
++        WeftBenchGameTests.forceChunks(level, columnA, true);
++        WeftBenchGameTests.forceChunks(level, columnB, true);
++        BlockPos baseA = surfaceBase(level, columnA);
++        BlockPos baseB = surfaceBase(level, columnB);
++
++        ActivationHooks.setActive(false);
++        PathfindingHooks.setActive(false);
++        SpawnDensityHooks.setActive(false);
++        RegionizedTicking.setActive(false);
++        LegacyRouting.setActive(false);
++
++        // [0] fused ticks and [1] fallbacks at the moment fan-out is known
++        // healthy; [2] fused ticks and [3] fallbacks just after the fresh BE.
++        long[] marks = new long[4];
++        String[] threadsBefore = new String[1];
++
++        helper.runAfterDelay(SETTLE_TICKS, () -> {
++            buildIsland(level, baseA);
++            buildIsland(level, baseB);
++            RegionizedTicking.setActive(true);
++            RegionizedTicking.setPartitioned(true);
++            RegionizedTicking.setMailRouting(true);
++            RegionizedTicking.setSingleJoin(true);
++            RegionizedTicking.setParallel(true);
++        });
++
++        // Let the fused path reach steady state and confirm it is fanning out
++        // BEFORE the disturbance. Without this the test could "pass" on a rig
++        // that never parallelized at all.
++        helper.runAfterDelay(SETTLE_TICKS + 40, () -> {
++            threadsBefore[0] = String.join(",",
++                    RegionizedTicking.lastEntityPartitionThreads());
++            marks[0] = RegionizedTicking.fusedTicks();
++            marks[1] = RegionizedTicking.fusedSerialFallbacks();
++            // The disturbance: a brand new block entity inside island A.
++            // NOT furnacePos(baseA) - buildIsland already put a furnace there,
++            // so setBlock would be a same-state no-op and register no fresh
++            // block entity at all. This spot is bare platform.
++            level.setBlock(baseA.offset(6, 0, 1),
++                    Blocks.FURNACE.defaultBlockState(), Block.UPDATE_CLIENTS);
++        });
++
++        helper.runAfterDelay(SETTLE_TICKS + 48, () -> {
++            marks[2] = RegionizedTicking.fusedTicks();
++            marks[3] = RegionizedTicking.fusedSerialFallbacks();
++        });
++
++        helper.runAfterDelay(SETTLE_TICKS + 100, () -> {
++            long ticksAfter = RegionizedTicking.fusedTicks() - marks[2];
++            long fallbacksAfter = RegionizedTicking.fusedSerialFallbacks() - marks[3];
++            long ticksDuring = marks[2] - marks[0];
++            long fallbacksDuring = marks[3] - marks[1];
++            String serverThread = level.getServer().getRunningThread().getName();
++            String[] threadsEnd = RegionizedTicking.lastEntityPartitionThreads();
++            tearDown(level, baseA, baseB);
++
++            LOGGER.info("p2fusefallback: beforeThreads={} duringTicks={} duringStandDown={} "
++                    + "afterTicks={} afterStandDown={}",
++                    threadsBefore[0], ticksDuring, fallbacksDuring,
++                    ticksAfter, fallbacksAfter);
++
++            if (threadsBefore[0] == null || threadsBefore[0].isEmpty()
++                    || threadsBefore[0].contains(serverThread)) {
++                helper.fail("Fused fan-out was not engaged BEFORE the fresh block entity ("
++                        + threadsBefore[0] + ") - with no fan-out to stand down from, a zero "
++                        + "fallback count would prove nothing");
++            }
++            if (ticksDuring <= 0) {
++                helper.fail("No fused ticks elapsed across the disturbance window - the rig "
++                        + "never exercised the fused path");
++            }
++            if (fallbacksDuring < 1) {
++                helper.fail("fusedSerialFallbacks NEVER incremented even though a fresh block "
++                        + "entity forced the fused path onto the server thread. The counter is "
++                        + "not wired to the stand-down it claims to measure, so p2fuse's "
++                        + "sustained-fan-out assertion is vacuous");
++            }
++            if (ticksAfter <= 0) {
++                helper.fail("Fused ticking stopped after the disturbance (" + ticksAfter + ")");
++            }
++            if (fallbacksAfter >= ticksAfter) {
++                helper.fail("Stand-down never cleared: " + fallbacksAfter + " of " + ticksAfter
++                        + " later fused ticks still stood down. A latching counter cannot "
++                        + "distinguish a transient fallback from a permanently serial run");
++            }
++            if (threadsEnd.length < 2) {
++                helper.fail("Fan-out did not resume after the fresh block entity: "
++                        + Arrays.toString(threadsEnd));
++            }
++            helper.succeed();
++        });
++    }
++
++    /**
+      * Does increment 5 (parallel regions, already on main) survive block
+      * entities that use NeoForge's <em>capability</em> path?
+      *
+      * <p>Motivation, and why this is not paranoia: the RFC-0008 sharding
+      * attempt crashed with an NPE inside
+      * {@code VanillaInventoryCodeHooks.extractHook} —
