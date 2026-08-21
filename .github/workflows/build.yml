@@ -72,3 +72,42 @@ jobs:
         with:
           name: weft-neoforge-jar
           path: weft-neoforge/build/libs/*.jar
+
+  # RFC-0005's parity suite is the project's hard correctness gate, and until now
+  # it only ran on bench.yml's 03:17 UTC schedule - so a PR could compile clean,
+  # be reviewed, merge, and only break parity hours later on a nightly nobody
+  # was watching. Every P2 increment so far has been gated by a gametest
+  # (p2parity, p2regions, p2partition, p2parallel, p2mail, p2navdefer...), which
+  # makes "did the suite pass on this change?" exactly the question review needs
+  # answered before merging, not after.
+  #
+  # It is a separate job rather than a step in `neoforge` so a parity failure is
+  # legible as a parity failure in the checks list, and so the jar still builds
+  # and uploads when correctness regresses.
+  parity:
+    name: "Parity suite (GameTest, 25 required)"
+    runs-on: ubuntu-latest
+    # A booted server running 25 batches is minutes, not seconds; well under
+    # this, but a hung tick loop must not burn a full runner hour.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Run the full GameTest suite
+        # Exits nonzero on any required-test failure (gameTestServer's contract),
+        # so no extra assertion step is needed here.
+        run: gradle :weft-neoforge:runGameTestServer -PwithNeoForge --console=plain
+      - name: Upload gametest server log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: parity-gametest-logs
+          path: |
+            weft-neoforge/run/gametest/logs/
+            weft-neoforge/run/gametest/crash-reports/
+            weft-neoforge/run/gametest/*.json
+            weft-neoforge/run/gametest/*.txt
