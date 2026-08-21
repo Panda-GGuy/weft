@@ -43,24 +43,37 @@ Worktree is clean and pushed at `7423942`; preserve it.
   CI compile/build is not soak.
 - Exit: #3/#6 close only with named non-vacuous gates; otherwise remain open.
 
-## Compatibility handoff — READY
+## Compatibility handoff — DONE, awaiting review
 
-Branch/worktree: field worktree `C:\Users\Panda\weft` currently contains mixed
-dirty work from several packets. Touch only compat files or move work to a clean
-branch without resetting existing changes.
+Branch `crew/compat-moonrise-16` @ `49297b9`, PR #23. Field worktree
+`C:\Users\Panda\weft` is on that branch and still holds unrelated dirty work
+from other packets (fan-out status line, rcon.py, lab scripts) — preserve it.
 
-- Issue #16 is source of truth: Moonrise mid-tick task asserted main-thread
-  execution from Weft worker under `parallelRegions`.
-- Validate neighbor detection uses actual Moonrise mod id(s), then ship tested
-  coexistence posture: profiler cooperate; tick-ownership modules yield or
-  refuse. Ensure posture transitively prevents `parallelRegions` worker path,
-  not only top-level `regionized_ticking` UI state.
-- Add sandbox registry test and a coexistence/launch assertion proving worker
-  fan-out cannot engage when Moonrise is present.
-- Update RFC-0003/neighbor docs and issue #16 with exact evidence. Until merged,
-  lab rule is: no Moonrise + parallel/region ownership soak.
-- Do not absorb unrelated fan-out-status, watchdog, routing, or lab edits from
-  field worktree into compat commit.
+Delivered:
+- `moonrise` registry row: profiler cooperate; `regionized_ticking`,
+  `entity_sharding`, `legacy_lane` yield. Yield not refuse (no tick-ownership
+  claim, RESEARCH-0002 §1).
+- P1 services deliberately NOT yielded, pinned by
+  `moonriseLeavesP1ServicesAlone`.
+- `WeftModules` disarmed-sub-flags line: a yielded module prints no
+  extraDetail, so the "my toml says parallelRegions = true" contradiction is
+  now visible instead of silent.
+- R7 `moonrise` cell boots the FULL parallel stack in config and greps the
+  disarmed line — a YIELDED line alone cannot distinguish parked from
+  relabelled.
+- Booted locally both directions: cell shows YIELDED + DISARMED +
+  `owned parallel=0` with pathfinding still ACTIVE; negative control (same
+  config, no stub) shows `regionized_ticking ACTIVE (increment 5 parallel)`.
+- RFC-0006 hazard 20 candidate -> confirmed; RFC-0003 §3.2 added; issue #16
+  commented with the evidence.
+
+Remaining for compat:
+- Land #23, then close #16.
+- Hazard 20's first route is still unbuilt: express the worker chunk-read path
+  against a surface Moonrise preserves. Until then co-enabling is unsupported,
+  not merely untested. Lab rule stands: no Moonrise + parallel soak.
+- Hazard 19 (ScalableLux / light engine) posture still deliberately unset —
+  same shape, no evidence yet, do not seed one.
 
 ## Release handoff — READY
 
