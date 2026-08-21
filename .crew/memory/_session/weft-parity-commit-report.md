@@ -3,8 +3,9 @@
 - Branch: `crew/parity-close`
 - Rebased head before this report: `886fc71dc49fbfb71dccccf9cc05cf11bd555be6`.
 - Base: `origin/main` at `a50886b4582718e2126d93e5ed0117493ab33d2f`.
-- Report commit SHA: recorded in PR #15 head and push output; commit cannot
-  embed its own SHA without changing that SHA.
+- Rebased `p2navdefer` gate commit: `0dfb58c`.
+- Rebased full-suite evidence commit: `886fc71`.
+- First post-rebase report checkpoint: `cd87a051a17f540dffcf46cebea4614c95189fe7`.
 - Increment: hazard-21 `p2navdefer` gate, measured navigation-deferral path,
   and honest equal-heap evidence checkpoint.
 - Default posture: unchanged. Regionized, partitioned, and parallel ticking remain default OFF; no default-ON approval granted.
