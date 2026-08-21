@@ -898,8 +898,55 @@ public final class RegionizedTicking {
         long unready = unreadyUnits.sum();
         String unreadyStr = unready == 0 ? "" : "; " + unready
                 + " units deferred (read neighbourhood not live)";
+        // Deliberately NOT appending fanOutEvidence() here: the status command
+        // prints it as its own line for every module state. A module's
+        // extraDetail is only rendered while it is ACTIVE, so folding it in here
+        // would both duplicate the line in the one state that matters most and
+        // hide it in the states where an operator is most likely to be confused.
         return mode + ": " + sections + "; " + RegionTopology.summary()
                 + mail + fuse + shards + borderReads + unreadyStr;
+    }
+
+    /**
+     * One-glance "is parallel actually fanning out?" line for field benches.
+     * Topology region count alone is not enough: a fat single-bucket partition
+     * keeps {@code owned∥=0} even when multiple regions exist on the map.
+     */
+    public static String fanOutEvidence() {
+        int entityBuckets = lastEntityPartition.length;
+        int beBuckets = lastBlockEntityPartition.length;
+        int entityThreads = distinctThreads(lastEntityPartitionThreads);
+        int beThreads = distinctThreads(lastBlockEntityPartitionThreads);
+        boolean entityFan = parallel && entityBuckets >= 2;
+        boolean beFan = parallel && beBuckets >= 2;
+        WeftScheduler engine = WeftMod.schedulerOrNull();
+        long ownedSerial = engine != null ? engine.ownedSerialSections() : 0L;
+        long ownedParallel = engine != null ? engine.ownedParallelSections() : 0L;
+        // Issue #16: `parallelRegions = true` in config is NOT the same thing as
+        // a live worker path. When the module yielded (Moonrise) or was never
+        // activated, `parallel` is false regardless of the config value, and an
+        // operator reading their own toml would conclude the opposite. Say it.
+        String engaged = !parallel
+                ? (WeftConfig.PARALLEL_REGIONS
+                        ? "DISARMED (parallelRegions is set in config, but the module is not "
+                                + "active - no worker fan-out can engage)"
+                        : "parallel flag off")
+                : (entityFan || beFan || ownedParallel > 0)
+                        ? "FAN-OUT ENGAGED"
+                        : "topology may be multi-region but last section was single-bucket (no fan-out)";
+        return String.format(
+                "fan-out: %s; last buckets entity=%d (threads=%d) be=%d (threads=%d); owned serial=%d parallel=%d",
+                engaged, entityBuckets, entityThreads, beBuckets, beThreads, ownedSerial, ownedParallel);
+    }
+
+    private static int distinctThreads(String[] names) {
+        if (names == null || names.length == 0) {
+            return 0;
+        }
+        return (int) java.util.Arrays.stream(names)
+                .filter(n -> n != null && !n.isEmpty())
+                .distinct()
+                .count();
     }
 
     private static long ownerId(ServerLevel level) {
