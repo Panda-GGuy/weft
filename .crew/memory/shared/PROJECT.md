@@ -29,8 +29,13 @@ ticking + graph layer + legacy lane for unknown mods.
   but `owned parallel=0` was often observed. Do not attribute result solely to
   multi-region fan-out.
 - Moonrise + `parallelRegions` crashed when Moonrise asserted a main-thread
-  chunk task from a Weft worker. Issue #16 is open. Shipping coexistence posture
-  must yield/refuse tick ownership until tested; never co-enable for soak.
+  chunk task from a Weft worker. Shipping posture now implemented in PR #23
+  (`crew/compat-moonrise-16`, `49297b9`): `moonrise` yields
+  `regionized_ticking`/`entity_sharding`/`legacy_lane`, profiler cooperates,
+  P1 services deliberately untouched. Booted both directions locally (R7 cell
+  disarmed with the full parallel stack in config; negative control ACTIVE).
+  Issue #16 stays open until #23 lands. Real coexistence is still unbuilt, so
+  never co-enable Moonrise + parallel for soak.
 - Durable source: `shared/FIELD-2026-08-20.md`.
 
 ## Pull request disposition
@@ -48,7 +53,10 @@ ticking + graph layer + legacy lane for unknown mods.
 
 ## Open issues
 
-- #16 Moonrise + parallel worker crash: open; compat shipping gate.
+- #16 Moonrise + parallel worker crash: open, but posture implemented and
+  booted in PR #23. Close on landing. RFC-0006 hazard 20 promoted from
+  candidate to confirmed; hazard 20's first route (worker read path expressed
+  against a Moonrise-preserved surface) remains unbuilt.
 - #3 hazard 21: open. PR #15 head `7423942` now carries non-vacuous
   `p2navdefer` evidence and one 25/25 full suite; review and land before tracker
   closure.

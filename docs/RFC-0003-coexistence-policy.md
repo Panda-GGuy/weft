@@ -85,7 +85,7 @@ it is, and which mods deliberately have *no* row — see
 | Lithium-family | `lithium` ✅ | Per-target: yield only colliding mixin territories | Cooperate, targeted yields |
 | **ServerCore** | `servercore` ✅ | **Entity Activation Range → WS-1** (strictly wider: whole-tick gating vs AI-frequency throttling); **`mob-spawning` + Dynamic Performance Checks → P1 spawn-density** (both construct/mediate the mobcap inputs) | **Yield on both.** Deliberately conservative — their activation range ships disabled and §4 forbids reading a neighbor's config, so modid presence is all Weft can see. R4 force-enable is the escape hatch |
 | **ScalableLux** | `scalablelux` ✅ | **WS-4.3 light propagation batching** (their lane). Nothing else Weft registers today | Yield `ws4_light`; Cooperate on profiler + spawn_density. **`regionized_ticking` posture deliberately UNSET** pending RFC-0006 hazard 19 — its parallel light updates are *on by default* (`parallelism` defaults to auto = `max(1, cores/3)`) and the interaction with worker-side block mutation is untested by either project |
-| Moonrise | `moonrise` ❌ **not in registry** | Was recorded "None material." **Narrowed 2026-08-18:** true for P0/P1 (same-thread entity/collision work, no tick-ownership claim, self-reports compatible with Lithium/FerriteCore). **Not established for P2** — Moonrise ports a *chunk system rewrite* and *Starlight*, and RFC-0006 hazards 1–4 build Weft's worker chunk read path directly on vanilla `ServerChunkCache` internals. See RFC-0006 hazard 20 (candidate) | Cooperate for P0/P1. **P2 posture unset** — do not seed one until hazard 20 closes |
+| **Moonrise** | `moonrise` ✅ (added 2026-08-20) | P0/P1: none material (same-thread entity/collision work, no tick-ownership claim). **P2: confirmed conflict** — its chunk-system rewrite ran `TickThread.ensureTickThread` from a Weft ForkJoin worker during a parallel entity section and crashed the tick loop (`Cannot execute main thread task off-main`). Hazard 20 is no longer a candidate; see issue #16 | **Cooperate on the profiler; yield `regionized_ticking`, `entity_sharding`, `legacy_lane`.** Yield rather than refuse — Moonrise claims no tick ownership, so the operator should not be forced to choose. P1 services keep running (they are not on the crashing path). R7 `moonrise` cell boots the full parallel stack in config and asserts it is disarmed |
 | Krypton / equivalents | ❌ modid unconfirmed | WS-9 network egress | Yield (decided, **not enforced**) |
 | C2ME | ❌ modid unconfirmed (Fabric-only at the mod level; NeoForge only via Connector) | Worldgen scheduling (WS-4 noise stays — different layer) | Yield scheduler, keep SIMD kernels if hookable, else yield both (decided, **not enforced**) |
 | ModernFix | ❌ modid unconfirmed | None material | Cooperate (= registry default for unknown mods, so absence is harmless here) |
@@ -124,6 +124,41 @@ Closed in the truthful direction, which is not "seed everything":
 Standing rule this establishes: **a row may not enter `weft-neighbors.toml`
 without (a) a modid read from `neoforge.mods.toml` / `fabric.mod.json`, and
 (b) an R7 matrix cell that boots it.** Postures nobody has booted are prose.
+
+### 3.2 Moonrise, re-postured by a crash (issue #16, 2026-08-20)
+
+§3.1 item 4 held that no P2 posture would be seeded for Moonrise until the
+hazard-20 audit closed. It closed the expensive way: a field boot with
+`parallelRegions` active crashed the tick loop, Moonrise's chunk system
+asserting main-thread execution from a Weft worker. That is the interaction
+the audit item existed to predict, so the posture is now seeded — the reason
+§3.1 withheld it was absence of evidence, and the evidence arrived.
+
+Two choices this pass deliberately makes:
+
+1. **Yield, not refuse.** Rung 4 is for mods that claim tick ownership, and
+   Moonrise claims none (RESEARCH-0002 §1) — refusing would make operators
+   choose between two mods that have no *architectural* conflict, only an
+   unbuilt integration. Yield parks Weft's module and Moonrise runs.
+   §4 still applies: no shim replicates region ticking while yielded.
+2. **Only the tick-ownership modules yield.** P1's off-thread services were
+   not on the crashing stack, and yielding them would be over-yielding by
+   association — the exact failure `ShippedNeighborRegistryTest` pins against.
+
+What makes the posture *enforced* rather than declared: yielding
+`regionized_ticking` disarms the crash path transitively.
+`RegionizedTicking.applyActive(false)` clears `partitioned`, and `parallel`
+is only ever assigned `partitioned && parallelRegions`, so a config file
+still reading `parallelRegions = true` cannot produce a worker section. The
+R7 `moonrise` cell boots exactly that configuration and greps for the
+disarmed-sub-flags line, because a posture-table line alone cannot
+distinguish a parked module from a relabelled one.
+
+**Not closed by this:** real coexistence. Weft's worker chunk reads
+(RFC-0006 hazards 1–4) are still reasoned against *vanilla*
+`ServerChunkCache` internals, and Moonrise replaces them. Co-enabling
+remains unsupported, and the lab rule stands: no Moonrise + parallel-region
+soak.
 
 ## 4. What we deliberately do NOT build
 

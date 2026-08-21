@@ -6,7 +6,8 @@
 - [x] OpenCode free confirmed connected (oc/*); CHEAP=oc/big-pickle
 - [x] Inc7 scaffold on main (PendingUnits, runOwnedFused, singleJoinTick OFF, NOTE-0001)
 - [ ] NOW: review PR #15 `7423942`; preserve 25/25 `p2navdefer` evidence, drop stale shared docs, keep #6 open
-- [ ] NOW: resolve Moonrise worker crash #16 with tested yield/refuse posture
+- [x] Moonrise #16 shipping posture: yield + booted R7 cell + negative control (PR #23, `49297b9`); issue closes on landing
+- [ ] NOW: review/land PR #23 (compat posture); no flag defaults change
 - [ ] NOW: re-review PR #14 `1bf784c`; finish non-vacuous fused gates and full-suite evidence (flag OFF)
 - [ ] READY: decide #3 after PR #15 review/landing; build `p2evictionchurn` (#6)
 - [ ] READY: RFC/README/field-bench status hygiene (weft-release)
