@@ -12,6 +12,9 @@
 - Selective batch invocation is not exposed by current Gradle run config. Final full-suite rerun after hardening reached the same earlier optional tracker crash before suite completion; full build is green.
 
 ## Lessons
+- 2026-08-21: after rebasing a pushed feature branch, re-run focused NeoForge
+  compile plus full build before force-pushing with lease; a clean rebase does
+  not preserve remote SHA identity or its old CI evidence.
 - 2026-08-20: equal-heap fair bench tied; worldgen MSPT alone is not a fan-out
   win. Keep `singleJoinTick` OFF; next useful signal is multi-bucket
   `entity_buckets > 1` under equal JVM/config, plus full GameTest isolation of

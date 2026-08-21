@@ -1,29 +1,27 @@
 # weft-neoforge commit report
 
 - Branch: `crew/neoforge-inc7`
-- Prior code SHA: `1bf784cc40ceb802463198ee09c76bf98c4de5c4`
-- Durable lesson SHA: `458f72144052e806c4724e5d55e2bff898278f85`
-- Relaunch checkpoint SHA: `e694757d753c0366b772434470177314e5c1d04f`
-- Final report SHA: `5ffb8446a8337974b07fe0c65da94d69ff30b289`
-- Push: `origin/crew/neoforge-inc7` matches `5ffb844`.
+- Rebased code/report head before this report: `299bf6dc76cb4c2fe7860c8403302211cecac96b`
+- Rebase base: `origin/main` at `a50886b4582718e2126d93e5ed0117493ab33d2f`
+- Report commit: recorded after commit below; pushed head is authoritative.
 
 ## Commands run
 
-- `git status --short --branch` and `git log -5 --oneline` — branch matched origin; only uncommitted crew lesson was meaningful dirty work.
-- `rg -n --glob '*.java' --glob '*.toml' --glob '*.md' 'singleJoinTick|single_join_tick' .` — confirmed `WeftConfig.java` still uses `.define("singleJoinTick", false)`.
-- `git diff --check` — PASS (line-ending warning only).
-- `./gradlew.bat :weft-neoforge:compileJava -PwithNeoForge --no-daemon` — BLOCKED during configuration by unreadable global Gradle transform metadata at `C:\Users\Panda\.gradle\caches\8.14\transforms\39ff6dc936bdefdcd26ab663d9630bb8\metadata.bin`.
-- Workspace-local `GRADLE_USER_HOME`, `--offline` retry — BLOCKED before compile because fresh cache lacked `net.neoforged.moddev:2.0.144`; wrapper download also reduced free disk to about 1.4 GB.
-- `git ls-remote --heads origin crew/neoforge-inc7` — origin remained at prior landed SHA before checkpoint.
+- `git fetch origin` — updated `origin/main` from `d9caacb` to `a50886b` (PR #22 merge).
+- `git rebase origin/main` — PASS; replayed eight branch commits without conflicts. No shared-memory conflict occurred, so no manual conflict resolution was needed.
+- `.\gradlew.bat :weft-neoforge:compileJava :weft-neoforge:compileGametestJava -PwithNeoForge --no-daemon` — PASS (`BUILD SUCCESSFUL`).
+- `.\gradlew.bat build -PwithNeoForge --no-daemon` — PASS (`BUILD SUCCESSFUL`, 27 actionable tasks: 3 executed, 24 up-to-date).
+- `git diff --check` — PASS.
+- `rg -n -F '.define("singleJoinTick", false)' weft-neoforge/src/main/java/dev/weft/neoforge/WeftConfig.java` — confirmed `singleJoinTick` remains default OFF.
 
-## Leftover risks
+## Evidence and leftover risks
 
-- Focused compile could not be repeated on this machine. Prior commit `1bf784c` records green `./gradlew build -PwithNeoForge` and `compileGametestJava` evidence.
-- Full GameTest suite remains red after `p2fuse` passes because optional `parallelregionsentitysection` hits known `Entity is already tracked!` tracker contamination.
-- `singleJoinTick` remains default OFF. Equal-heap Stressmark is tied (~39 vs ~40 MSPT), so no multi-region win or default-ON claim is justified.
-- `.gradle-user-neoforge/` is untracked local cache output from verification and is intentionally not committed.
+- Existing `p2fuse` gate proves non-vacuous two-region fused task engagement, worker-thread fan-out, and independent-island state equivalence. Earlier full-suite evidence reached and passed `p2fuse`.
+- Full `runGameTestServer` was not rerun in this checkpoint. Prior runs remain blocked later by optional `parallelregionsentitysection`: `Entity is already tracked!` from `ChunkMap.addEntity` / `PersistentEntitySectionManager.processPendingLoads`. No fused task appears in that crash stack; test isolation/tracker root cause remains open.
+- Deterministic cross-region stage-overlap, pending-unit, and forced fallback assertions are still missing from `p2fuse`; PR #14 must remain draft until those gates and full-suite evidence exist.
+- Equal-heap ON/OFF Stressmark is tied (about 39 vs 40 MSPT). This branch makes no multi-region win or default-ON claim. All P2 flags, including `singleJoinTick`, remain default OFF.
 
 ## Next owner
 
-- `weft-parity`: isolate/fix GameTest entity-tracker contamination and rerun full suite.
-- `weft-neoforge`: rerun focused compile after Gradle cache/disk repair; gather deterministic multi-bucket `p2fuse` evidence; keep `singleJoinTick` OFF.
+- `weft-neoforge`: add deterministic `p2fuse` overlap/pending/fallback probes without weakening canonical ordering; keep PR #14 draft and `singleJoinTick` OFF.
+- `weft-parity`: isolate `parallelregionsentitysection` entity-tracker contamination, then provide repeat full-suite evidence.
