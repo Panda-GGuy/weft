@@ -3,7 +3,7 @@
 ## Standing notes
 
 - Queue of record: `.crew/memory/shared/NEXT-QUEUE.md`.
-- Current main: `origin/main` `d1095cc` (2026-08-20 reconciliation).
+- Current main: `origin/main` `ac40243` (2026-08-20 commit-duty reconciliation).
 - Flags stay default OFF. Do not rewrite feature code from lead worktree.
 - Green CI/GameTests are regression evidence, never soak.
 - Field benchmark result cannot be credited to parallel fan-out while
@@ -13,9 +13,10 @@
 
 - #13 is stale docs based before field reorder; supersede/close after replacement
   docs land.
-- #15 is first merge candidate after rebase onto `d1095cc`; preserve harness fix
-  and parity report, drop stale shared queue copies.
-- #14 stays draft and parity-blocked at `1bf784c`. Its latest patch addresses
+- #15 is draft at `7423942`; preserve harness fix plus 25/25 `p2navdefer`
+  evidence, and drop stale shared PROJECT/BACKLOG copies before merge.
+- #14 stays draft and parity-blocked at branch head `97b9254` (code head
+  `1bf784c`). Its latest patch addresses
   fused serial routing and entity-tail-before-BE ordering; parity must re-review
   those fixes and still require deterministic overlap/pending/fallback gates plus
   two complete full-suite runs. Rebase after #15.
@@ -24,7 +25,8 @@
 ## Open threads
 
 - #16 Moonrise + `parallelRegions` crash: compat must ship tested yield/refuse.
-- #3: dirty `p2navdefer` work exists in parity worktree; preserve it.
+- #3: PR #15 now has pushed `p2navdefer` code and one 25/25 suite. Review and
+  land before closure; no longer describe parity worktree as dirty.
 - #6: `p2evictionchurn` remains required; PR #14's readiness fallback patch is
   code progress, not issue-closing evidence.
 - Release stays NOT READY until #3/#6/#16, corrected fusion contract,
@@ -54,6 +56,9 @@
 - 2026-08-20: if an assigned worktree path loses its Git metadata, preserve its
   scratch files, recover on a fresh linked worktree, and copy only reviewed
   lead-owned docs; never use the mixed main worktree as a substitute branch.
+- 2026-08-20: reconcile queue claims against remote branch reports and tracker
+  state, not old worktree snapshots; pushed evidence can make a previously dirty
+  packet reviewable without making it merged or release-ready.
 
 ## Hard constraints
 
