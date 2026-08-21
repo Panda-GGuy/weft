@@ -25,25 +25,25 @@ import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 /**
- * P2 loader-side glue (RFC-0001 Â§11): routes vanilla's entity and
+ * P2 loader-side glue (RFC-0001 Ã‚Â§11): routes vanilla's entity and
  * block-entity tick sections through the engine when {@code regionizedTicking}
  * is active.
  *
- * <p><b>Increment 1 â€” whole-level serial ownership.</b> Each
+ * <p><b>Increment 1 Ã¢â‚¬â€ whole-level serial ownership.</b> Each
  * {@link ServerLevel} is one engine-owned region (an id reserved from the
  * scheduler's {@code RegionManager}, deliberately never entered into a chunk
- * map); its sections run through {@link WeftScheduler#runOwnedSerial} â€” same
+ * map); its sections run through {@link WeftScheduler#runOwnedSerial} Ã¢â‚¬â€ same
  * thread, same vanilla iteration order, bit-identical by construction.
  *
- * <p><b>Increment 4 â€” partitioned ticking (still serial).</b> With
+ * <p><b>Increment 4 Ã¢â‚¬â€ partitioned ticking (still serial).</b> With
  * {@code partitionedTicking} also on, each section is instead grouped by
  * {@link RegionTopology}'s <em>real</em> regions and executed
  * bucket-by-bucket in canonical (ascending region id) order, each bucket
- * under a REGION thread context carrying its real region id â€” the execution
+ * under a REGION thread context carrying its real region id Ã¢â‚¬â€ the execution
  * shape of parallel regions with the concurrency removed. Vanilla order is
  * preserved <em>within</em> each region; only cross-region interleaving
- * changes, which is unobservable for regions kept â‰¥ mergeDistance apart
- * (RFC-0001 Â§4.2) â€” the parity suite holds this at E0 on its single-region
+ * changes, which is unobservable for regions kept Ã¢â€°Â¥ mergeDistance apart
+ * (RFC-0001 Ã‚Â§4.2) Ã¢â‚¬â€ the parity suite holds this at E0 on its single-region
  * arena, and the {@code p2partition} gametest holds two independent islands
  * to control-equal end states. Collection preserves vanilla's own semantics:
  * {@code EntityTickList.forEach} freezes the iterated map (mid-tick spawns
@@ -54,16 +54,16 @@ import java.util.function.Consumer;
  * level's owner id.
  *
  * <p>What increment 4 deliberately does <em>not</em> do: run buckets on
- * workers. True parallelism (class E1) needs the shared-structure audit â€”
+ * workers. True parallelism (class E1) needs the shared-structure audit Ã¢â‚¬â€
  * entity-section storage mutation, cross-region teleports, {@code
- * level.random} draws, packet sends â€” and owner-mail rerouting; serial
+ * level.random} draws, packet sends Ã¢â‚¬â€ and owner-mail rerouting; serial
  * partitioning has none of those hazards by construction and exists so the
  * partition seam, the real-id contexts, and the canonical order are proven
  * before threads arrive.
  *
  * <p>The {@code active} flag is owned by the coexistence resolution
  * ({@code WeftModules}). R6: inactive means the wrapped call sites invoke the
- * vanilla section directly â€” zero behavioral residue.
+ * vanilla section directly Ã¢â‚¬â€ zero behavioral residue.
  */
 public final class RegionizedTicking {
 
@@ -94,7 +94,7 @@ public final class RegionizedTicking {
      * memory-reach classification.
      *
      * <p>Deliberately separate from {@link #unreadyUnits}, which is incremented
-     * by three different causes â€” memory-reach entities, entities whose read
+     * by three different causes Ã¢â‚¬â€ memory-reach entities, entities whose read
      * neighbourhood is not live, and block entities in the same situation. A
      * gate that wants to prove "the villagers took the serial tail" cannot read
      * the conflated counter: on any arena with border chunks the neighbourhood
@@ -115,7 +115,7 @@ public final class RegionizedTicking {
      * <p>Exists because the WS-7 exporter had no honest source for this and used
      * a dishonest one: it summed {@link #lastBlockEntityPartition()}, which holds
      * <em>region ids</em>, and published the total as a block-entity count. On a
-     * three-region world that reported "6" â€” ids 1+2+3 â€” while the level was
+     * three-region world that reported "6" Ã¢â‚¬â€ ids 1+2+3 Ã¢â‚¬â€ while the level was
      * ticking thousands. The loop variable was even named {@code units}, which is
      * how a type-correct {@code long[]} carried the wrong meaning past review.
      */
@@ -123,7 +123,7 @@ public final class RegionizedTicking {
 
     /** Thread names per bucket of the most recent entity section (E1 probe). */
     private static volatile String[] lastEntityPartitionThreads = new String[0];
-    /** Same, for the block-entity section â€” the only probe a BE-only rig has. */
+    /** Same, for the block-entity section Ã¢â‚¬â€ the only probe a BE-only rig has. */
     private static volatile String[] lastBlockEntityPartitionThreads = new String[0];
 
     /**
@@ -244,19 +244,19 @@ public final class RegionizedTicking {
      * live", and it has to be asked because vanilla's own guarantee is weaker
      * than it looks. {@code ChunkMap.prepareEntityTickingChunk} promises radius-2
      * at {@code ChunkStatus.FULL} <em>at the moment of promotion</em>; it does not
-     * promise the neighbours stay resident. When one is evicted â€” a teleport
-     * releasing a ticket, a pre-generator's sweep moving on â€” vanilla carries on
+     * promise the neighbours stay resident. When one is evicted Ã¢â‚¬â€ a teleport
+     * releasing a ticket, a pre-generator's sweep moving on Ã¢â‚¬â€ vanilla carries on
      * regardless, because {@code getChunk(load=true)} simply loads it again. A
      * region worker has no such option: hazard 1 forbids it from driving the
      * chunk system, so the same lazy load is a hard failure.
      *
      * <p>That is what crashed a live world on a teleport. A vault sitting on the
-     * westernmost block of its chunk called {@code setChanged} â†’
+     * westernmost block of its chunk called {@code setChanged} Ã¢â€ â€™
      * {@code updateNeighbourForOutputSignal}, read one block west into the
      * adjacent chunk, and that chunk was gone. Hazard 22's border fallback could
      * not help: there was no generated view either.
      *
-     * <p>Radius 1, not 2, because that is what the failure actually reaches â€” a
+     * <p>Radius 1, not 2, because that is what the failure actually reaches Ã¢â‚¬â€ a
      * block entity's neighbour-signal path is one block. Entities can reach
      * further, and the entity section uses this too; that is deliberately
      * conservative rather than complete, and the guard still fails loud for
@@ -264,7 +264,7 @@ public final class RegionizedTicking {
      * than corrupt something quietly.
      *
      * <p>Probed with {@code getChunkNow}, which on the server thread is vanilla's
-     * own method â€” a visible-map lookup, no load triggered, no promotion
+     * own method Ã¢â‚¬â€ a visible-map lookup, no load triggered, no promotion
      * required. Cached per chunk per section, so the cost is nine lookups per
      * <em>chunk</em> rather than per unit: a few hundred microseconds on a
      * chunk-dense world, against a crash.
@@ -373,7 +373,7 @@ public final class RegionizedTicking {
     /**
      * Every transition to OFF flushes queued region mail inline (server
      * thread) so nothing is stranded behind a flag no bucket will drain
-     * again (RFC-0007 Â§3.3 hazard 5). Flag flips happen on the server thread
+     * again (RFC-0007 Ã‚Â§3.3 hazard 5). Flag flips happen on the server thread
      * (config resolution, gametests).
      */
     private static void updateMailRouted(boolean value) {
@@ -388,7 +388,7 @@ public final class RegionizedTicking {
         return active;
     }
 
-    /** Whether owner mail routes to region mailboxes (increment 6, RFC-0007 Â§3). */
+    /** Whether owner mail routes to region mailboxes (increment 6, RFC-0007 Ã‚Â§3). */
     public static boolean isMailRouted() {
         return mailRouted;
     }
@@ -498,8 +498,8 @@ public final class RegionizedTicking {
             }
         }));
 
-        // Increment 6 (RFC-0007 Â§3.2): each bucket drains its region's owner
-        // mail first, under the bucket's own REGION context â€” delivery lands
+        // Increment 6 (RFC-0007 Ã‚Â§3.2): each bucket drains its region's owner
+        // mail first, under the bucket's own REGION context Ã¢â‚¬â€ delivery lands
         // before any of the owner's simulation this section. Flag captured
         // once so the whole section sees one policy.
         boolean drainMail = mailRouted;
@@ -619,8 +619,8 @@ public final class RegionizedTicking {
     /**
      * Called (server thread) from the wrapped {@code Level.tickBlockEntities}
      * body when the level is a ServerLevel. In partitioned mode the vanilla
-     * loop runs as a collection pass â€” {@link #captureBlockEntityUnit}
-     * buffers each unit â€” and the buckets execute afterwards, canonical
+     * loop runs as a collection pass Ã¢â‚¬â€ {@link #captureBlockEntityUnit}
+     * buffers each unit Ã¢â‚¬â€ and the buckets execute afterwards, canonical
      * order, real region ids.
      */
     public static void tickBlockEntitySectionOwned(ServerLevel level, Runnable vanillaSection) {
@@ -662,7 +662,7 @@ public final class RegionizedTicking {
         int unmappedAtCapture = beUnmapped;
 
         // Increment 6: bucket-head owner-mail drain, same contract as the
-        // entity section (RFC-0007 Â§3.2).
+        // entity section (RFC-0007 Ã‚Â§3.2).
         boolean drainMail = mailRouted;
         // RFC-0006 hazard 23: sharding and region fan-out must not both engage
         // in the same section. runBuckets decides fan-out from this same bucket
@@ -677,7 +677,7 @@ public final class RegionizedTicking {
         // server thread parked in awaitAll and all 14 workers idle in awaitWork
         // (jstack, two dumps, same task object).
         //
-        // Standing sharding down costs nothing, because RFC-0008 Â§1 already
+        // Standing sharding down costs nothing, because RFC-0008 Ã‚Â§1 already
         // scopes it that way: block-entity sharding is "the solo-play lever,
         // where region-level parallelism is a no-op because the world is one
         // region". If two or more regions are already fanning out, the worker
@@ -1081,8 +1081,8 @@ public final class RegionizedTicking {
      * <p>Exists because the exporter aggregates: a histogram cannot be sliced
      * into the alternating phases an interleaved A/B/A/B benchmark pools, and
      * <em>per-tick section samples pooled per phase</em> is the ruler P2's
-     * first throughput attempt lacked â€” it judged a change confined to one
-     * section by full-tick MSPT, and the effect was swamped (RFC-0008 Â§4,
+     * first throughput attempt lacked Ã¢â‚¬â€ it judged a change confined to one
+     * section by full-tick MSPT, and the effect was swamped (RFC-0008 Ã‚Â§4,
      * the retracted 1.59x).
      *
      * <p>Called on the server thread, after the barrier, once per section.
@@ -1111,7 +1111,7 @@ public final class RegionizedTicking {
 
     /**
      * Execute one section's buckets: fanned out on the engine pool when
-     * parallel mode is on and there are â‰¥2 buckets (RFC-0006 Â§2 â€” the
+     * parallel mode is on and there are Ã¢â€°Â¥2 buckets (RFC-0006 Ã‚Â§2 Ã¢â‚¬â€ the
      * server thread barriers here), otherwise increment-4 serial on the
      * calling thread. Region workers are flagged via {@link ParallelAccess}
      * so the safety mixins engage only inside buckets. Returns the thread
@@ -1123,21 +1123,21 @@ public final class RegionizedTicking {
     }
 
     /**
-     * As above, additionally carrying the WS-7 timing probe (RFC-0009 Â§9.2 â€” the
+     * As above, additionally carrying the WS-7 timing probe (RFC-0009 Ã‚Â§9.2 Ã¢â‚¬â€ the
      * one new measurement this workstream adds, and the one the review approved).
      *
      * <p><b>Cost: two {@code System.nanoTime()} calls per BUCKET per section, plus
      * one pair around the barrier.</b> O(buckets), not O(units): the existing P0
-     * profiler pays two per <em>entity</em>. On a solo world â€” one region, which is
-     * the WS-10 case â€” that is two clock reads for the whole section.
+     * profiler pays two per <em>entity</em>. On a solo world Ã¢â‚¬â€ one region, which is
+     * the WS-10 case Ã¢â‚¬â€ that is two clock reads for the whole section.
      *
      * <p>Double-gated on the observability module being active and on
-     * {@code regionTimingEnabled} â€” or, in tests only, on a {@link SectionProbe}
+     * {@code regionTimingEnabled} Ã¢â‚¬â€ or, in tests only, on a {@link SectionProbe}
      * being installed. When all three are off, the {@code long[]} is never
      * allocated and no clock is read (R6: zero residue). What it buys is
      * per-region tick duration, hottest-region share, and a worker-utilisation
      * ratio that is a real work-conservation figure rather than a scrape-time
-     * sample of an idle pool (Â§3.3).
+     * sample of an idle pool (Ã‚Â§3.3).
      */
     private static String[] runBuckets(WeftScheduler engine,
                                        List<WeftScheduler.OwnedSection> sections,
@@ -1198,7 +1198,7 @@ public final class RegionizedTicking {
 
     /**
      * Queue work to run on the server thread right after the current
-     * section's barrier (worker-context dimension changes, RFC-0006 Â§3 #14).
+     * section's barrier (worker-context dimension changes, RFC-0006 Ã‚Â§3 #14).
      */
     public static void deferToSectionEnd(Runnable task) {
         sectionEndTasks.add(task);
@@ -1249,7 +1249,7 @@ public final class RegionizedTicking {
 
     /**
      * Per-ticker seam (the {@code TickingBlockEntity.tick()} call-site mixin).
-     * Returns true when the unit was captured into a partition bucket â€” the
+     * Returns true when the unit was captured into a partition bucket Ã¢â‚¬â€ the
      * caller must then NOT run it inline. {@code unit} must not close over a
      * MixinExtras Operation (it executes after the handler frame returns);
      * the mixin passes the ticker's own {@code tick()} through the lane check.
@@ -1323,8 +1323,8 @@ public final class RegionizedTicking {
 
     /**
      * Units the hazard-24 gate sent to the serial tail. Unlike unmapped units
-     * this is expected to be non-zero on a world with chunk churn â€” a
-     * pre-generator or a teleporting player evicts neighbours constantly â€” and
+     * this is expected to be non-zero on a world with chunk churn Ã¢â‚¬â€ a
+     * pre-generator or a teleporting player evicts neighbours constantly Ã¢â‚¬â€ and
      * it is the counter that says how much work the gate is taking off the
      * workers.
      */
@@ -1340,6 +1340,8 @@ public final class RegionizedTicking {
      */
     public static long memoryReachUnits() {
         return memoryReachUnits.sum();
+    }
+
     public static long fusedTicks() {
         return fusedTicks.sum();
     }
@@ -1451,7 +1453,7 @@ public final class RegionizedTicking {
     /**
      * One-glance "is parallel actually fanning out?" line for field benches.
      * Topology region count alone is not enough: a fat single-bucket partition
-     * keeps {@code ownedâˆ¥=0} even when multiple regions exist on the map.
+     * keeps {@code ownedÃ¢Ë†Â¥=0} even when multiple regions exist on the map.
      */
     public static String fanOutEvidence() {
         int entityBuckets = lastEntityPartition.length;
