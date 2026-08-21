@@ -54,7 +54,16 @@ final class ParityScenario {
     private static final long LEVEL_RNG_SEED = 0x5EED_2001L;
     private static final long MOB_POS_SEED = 0x5EED_2002L;
     private static final long MOB_RNG_SEED_BASE = 0x5EED_2003L;
-    /** Far above anything the short-lived GameTest server can allocate naturally. */
+    /**
+     * Far above anything the short-lived GameTest server can allocate naturally.
+     *
+     * <p>Safe because every arena build is <em>sequential</em>: the two callers
+     * (p2parity, p2observability) are in different batches, and within a run each
+     * build is preceded by {@link #reset}. A second arena built concurrently in
+     * the same batch would assign the same ids twice and corrupt the level's
+     * entity map — so if that is ever wanted, offset this base per arena rather
+     * than sharing it.
+     */
     private static final int ENTITY_ID_BASE = 5_000_000;
 
     private static final int DEMOLISH_FLAGS =

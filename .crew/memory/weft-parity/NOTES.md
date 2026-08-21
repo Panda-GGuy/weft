@@ -46,6 +46,17 @@
   reports for this specific stack shape and add to the list on sight.
 
 ## Lessons
+- 2026-08-20 (review of own #3 gate): the first `p2navdefer` revision asserted
+  the villager serial tail by reading `unreadyUnits`, which is incremented by
+  THREE causes - memory-reach entities, entities whose read neighbourhood is not
+  live, and block entities in the same state. On an arena with border chunks the
+  neighbourhood cause alone can clear a `>= VILLAGERS` threshold with zero
+  villagers ever classified, i.e. a vacuous pass in a gate written specifically
+  to be non-vacuous. Split out `memoryReachUnits` and asserted that instead.
+  Generalise: before asserting a threshold on a counter, grep every increment
+  site. A shared counter can only prove the union of its causes. This is the
+  same mistake the unmapped/unready split already fixed one counter earlier -
+  which means the pattern, not the counter, is the recurring defect.
 - 2026-08-20 fair equal-heap worldgen ON/OFF was tied (MSPT ~39 vs ~40). Do not
   treat worldgen Stressmark as fan-out/default-ON evidence. Keep #3/#6 open until
   dedicated gates prove real multi-bucket fan-out; keep singleJoinTick OFF.

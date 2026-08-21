@@ -176,7 +176,10 @@ public class MemoryReachEntityGameTests {
             baseline[0] = RegionizedTicking.deferredNavigationUpdates();
             baseline[1] = RegionizedTicking.completedNavigationUpdates();
             baseline[2] = RegionizedTicking.misplacedNavigationUpdates();
-            baseline[3] = RegionizedTicking.unreadyUnits();
+            // Hazard 25's OWN counter, not unreadyUnits: that total also counts
+            // border-chunk and block-entity deferrals, either of which can clear
+            // a villager-shaped threshold with no villager ever classified.
+            baseline[3] = RegionizedTicking.memoryReachUnits();
             RegionizedTicking.setActive(true);
             RegionizedTicking.setPartitioned(true);
             RegionizedTicking.setParallel(true);
@@ -195,7 +198,7 @@ public class MemoryReachEntityGameTests {
             long deferred = RegionizedTicking.deferredNavigationUpdates() - baseline[0];
             long completed = RegionizedTicking.completedNavigationUpdates() - baseline[1];
             long misplaced = RegionizedTicking.misplacedNavigationUpdates() - baseline[2];
-            long serialVillagerTicks = RegionizedTicking.unreadyUnits() - baseline[3];
+            long serialVillagerTicks = RegionizedTicking.memoryReachUnits() - baseline[3];
             String[] threads = RegionizedTicking.lastEntityPartitionThreads();
             String serverThread = level.getServer().getRunningThread().getName();
             long regionA = regionIdAt(level, baseA);
@@ -221,7 +224,8 @@ public class MemoryReachEntityGameTests {
             }
             if (serialVillagerTicks < VILLAGERS) {
                 helper.fail("Villager/Brain serial tail did not engage while worker fan-out ran: "
-                        + serialVillagerTicks);
+                        + "memory-reach classifications=" + serialVillagerTicks
+                        + " expected >=" + VILLAGERS);
                 return;
             }
             helper.succeed();

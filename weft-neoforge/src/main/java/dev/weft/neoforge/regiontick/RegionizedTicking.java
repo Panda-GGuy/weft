@@ -86,6 +86,20 @@ public final class RegionizedTicking {
     private static final LongAdder completedNavigationUpdates = new LongAdder();
     /** Fail-loud counter: a deferred navigation callback must never run elsewhere. */
     private static final LongAdder misplacedNavigationUpdates = new LongAdder();
+    /**
+     * Entities sent to the serial tail specifically by hazard 25's
+     * memory-reach classification.
+     *
+     * <p>Deliberately separate from {@link #unreadyUnits}, which is incremented
+     * by three different causes — memory-reach entities, entities whose read
+     * neighbourhood is not live, and block entities in the same situation. A
+     * gate that wants to prove "the villagers took the serial tail" cannot read
+     * the conflated counter: on any arena with border chunks the neighbourhood
+     * cause alone can satisfy a {@code >= villagerCount} threshold with zero
+     * villagers classified, which is a vacuous pass. Same lesson the
+     * unmapped/unready split already learned one counter earlier.
+     */
+    private static final LongAdder memoryReachUnits = new LongAdder();
 
     /** Region ids of the most recent partitioned sections (gametest probes). */
     private static volatile long[] lastEntityPartition = new long[0];
@@ -313,6 +327,7 @@ public final class RegionizedTicking {
         sectionProbe = null;
         readyCache = null;
         unreadyUnits.reset();
+        memoryReachUnits.reset();
         ParallelAccess.resetBorderReads();
         BlockEntityShards.reset();
         ownerIds.clear();
@@ -376,6 +391,10 @@ public final class RegionizedTicking {
                 // Hazard 25: Brain AI reads REMEMBERED positions (bed, job site,
                 // hive) at arbitrary range, so no neighbourhood radius bounds it.
                 unreadyUnits.increment();
+                // Also counted on its own: see memoryReachUnits' note - the
+                // conflated total cannot distinguish this cause from a border
+                // chunk, so a hazard-25 gate reading it could pass vacuously.
+                memoryReachUnits.increment();
                 tail.add(entity);
             } else if (gateReads && !readNeighbourhoodLive(level, chunk.x, chunk.z)) {
                 unreadyUnits.increment();
@@ -785,6 +804,16 @@ public final class RegionizedTicking {
      */
     public static long unreadyUnits() {
         return unreadyUnits.sum();
+    }
+
+    /**
+     * The hazard-25 (memory-reach) share of {@link #unreadyUnits()}, counted
+     * separately so a gate can assert that cause specifically. Reading the
+     * conflated total instead lets a border-chunk deferral satisfy a
+     * villager-shaped threshold with zero villagers classified.
+     */
+    public static long memoryReachUnits() {
+        return memoryReachUnits.sum();
     }
 
     /** Region ids of the most recent partitioned entity section (probe). */
