@@ -20,7 +20,17 @@ enable any ownership/parallel flag.
    `feat/p2-parallel-regions-throughput`, `feat/ws7-observability-exporter`,
    `crew/sync-queue-main`. Keep only open-PR branches + active release hygiene.
 
-## Parity handoff — READY
+## STATE AS OF 2026-08-20 LATE — read this first
+
+`origin/main` = `65a727a`. Merged today: #23 (Moonrise posture), #24 (parity
+suite now gates every PR), #15 (p2navdefer + counter split). Issues #16 and #3
+CLOSED. **#6 is the only open issue.** PR #25 open (fan-out honesty, reviewed
+and verified live). PR #14 still draft and now rebase-stale.
+
+Everything below this line predates those merges — treat the parity/compat/
+release sections as historical unless re-verified.
+
+## Parity handoff — SUPERSEDED (see state block above)
 
 Branch/worktree: `crew/parity-close` / `C:\Users\Panda\weft-wt-parity`.
 Worktree is clean and pushed at `7423942`; preserve it.
