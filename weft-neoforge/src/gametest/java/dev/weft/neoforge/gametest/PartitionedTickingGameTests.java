@@ -1,5 +1,7 @@
 package dev.weft.neoforge.gametest;
 
+import com.mojang.logging.LogUtils;
+
 import dev.weft.neoforge.activation.ActivationHooks;
 import dev.weft.neoforge.coexist.WeftModules;
 import dev.weft.neoforge.legacy.LegacyRouting;
@@ -22,6 +24,8 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.neoforged.neoforge.gametest.GameTestHolder;
 import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
+
+import org.slf4j.Logger;
 
 import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicReference;
@@ -51,6 +55,8 @@ import java.util.concurrent.atomic.AtomicReference;
 @GameTestHolder("weft")
 @PrefixGameTestTemplate(false)
 public class PartitionedTickingGameTests {
+
+    private static final Logger LOGGER = LogUtils.getLogger();
 
     private static final int SETTLE_TICKS = 10;
     /** >200 so each furnace produces output (a vacuous-arena guard in itself). */
@@ -272,7 +278,32 @@ public class PartitionedTickingGameTests {
         });
     }
 
-    /** Increment-7 smoke gate: fused path engages and keeps two-island results equivalent. */
+    /**
+     * P2 increment-7 gate (RFC-0007 sec. 4): the FUSED single-join path - one
+     * task per region carrying mail drain, entity stage and block-entity stage
+     * as one uninterrupted unit, joined once for the whole set.
+     *
+     * <p>Asserted, and why each assertion has to exist separately:
+     * <ol>
+     *   <li><b>Engagement</b> - fused ticks and region tasks counted across the
+     *       window, so an inactive path cannot pass as a passing gate.</li>
+     *   <li><b>SUSTAINED fan-out</b> - the thread probe describes only the LAST
+     *       section, and {@code fusedTicks} counts a stood-down tick exactly
+     *       like a fanned-out one. Between them they cannot tell "every tick
+     *       fanned out" from "209 ticks ran serial and the last one fanned
+     *       out". The stand-down direction therefore gets asserted on its own
+     *       counter, and the two must account for every fused tick.</li>
+     *   <li><b>No unexplained deferral</b> - this rig force-loads its chunks and
+     *       its only mob is an armour stand, so neither the hazard-24 absent
+     *       neighbour shape nor the hazard-25 memory-reach shape can arise. Each
+     *       cause counter must read zero. Nonzero means the fused path deferred
+     *       work for a reason this rig cannot produce - and since those counters
+     *       are what a future hazard gate will assert on, a false positive here
+     *       would silently make that gate meaningless.</li>
+     *   <li><b>Equivalence</b> - each island's end state stays bit-identical to
+     *       an inline control at equal tick counts.</li>
+     * </ol>
+     */
     @GameTest(template = "empty", batch = "p2fuse", timeoutTicks = 1600)
     public void fusedTickingIndependentIslands(GameTestHelper helper) {
         ServerLevel level = helper.getLevel();
@@ -293,7 +324,7 @@ public class PartitionedTickingGameTests {
 
         AtomicReference<String> controlA = new AtomicReference<>();
         AtomicReference<String> controlB = new AtomicReference<>();
-        long[] baselines = new long[2];
+        long[] baselines = new long[6];
         helper.runAfterDelay(SETTLE_TICKS, () -> {
             buildIsland(level, baseA);
             buildIsland(level, baseB);
@@ -307,6 +338,12 @@ public class PartitionedTickingGameTests {
             buildIsland(level, baseB);
             baselines[0] = RegionizedTicking.fusedTicks();
             baselines[1] = RegionizedTicking.fusedRegions();
+            // Every counter this gate asserts on is baselined: earlier
+            // batches in the same server run leave nonzero totals behind.
+            baselines[2] = RegionizedTicking.fusedSerialFallbacks();
+            baselines[3] = RegionizedTicking.unreadyUnits();
+            baselines[4] = RegionizedTicking.memoryReachUnits();
+            baselines[5] = RegionizedTicking.unreadyBlockEntityUnits();
             RegionizedTicking.setActive(true);
             RegionizedTicking.setPartitioned(true);
             RegionizedTicking.setMailRouting(true);
@@ -318,6 +355,14 @@ public class PartitionedTickingGameTests {
             String laneB = furnaceDigest(level, furnacePos(baseB));
             long ticks = RegionizedTicking.fusedTicks() - baselines[0];
             long regions = RegionizedTicking.fusedRegions() - baselines[1];
+            long fallbacks = RegionizedTicking.fusedSerialFallbacks() - baselines[2];
+            long unready = RegionizedTicking.unreadyUnits() - baselines[3];
+            long memoryReach = RegionizedTicking.memoryReachUnits() - baselines[4];
+            long unreadyBe = RegionizedTicking.unreadyBlockEntityUnits() - baselines[5];
+            // parallel stayed true for the whole window (tearDown clears it
+            // below, after every read), so fan-out is the complement of
+            // stand-down: the fallback counter only moves while parallel.
+            long fannedOut = ticks - fallbacks;
             String[] threads = RegionizedTicking.lastEntityPartitionThreads();
             String serverThread = level.getServer().getRunningThread().getName();
             tearDown(level, baseA, baseB);
@@ -328,6 +373,28 @@ public class PartitionedTickingGameTests {
             if (threads.length < 2 || Arrays.stream(threads)
                     .anyMatch(thread -> thread == null || thread.equals(serverThread))) {
                 helper.fail("Fused parallel fan-out did not engage: " + Arrays.toString(threads));
+            }
+
+            LOGGER.info("p2fuse: fusedTicks={} regions={} fannedOut={} standDown={} "
+                    + "unready={} memoryReach={} unreadyBe={}",
+                    ticks, regions, fannedOut, fallbacks, unready, memoryReach, unreadyBe);
+
+            if (fallbacks < 0 || fallbacks > ticks) {
+                helper.fail("Stand-down accounting is broken: " + fallbacks
+                        + " stand-downs across " + ticks + " fused ticks - the two counters "
+                        + "must partition the fused ticks, or neither can be trusted");
+            }
+            if (fannedOut < RUN_TICKS - 32) {
+                helper.fail("Fused fan-out was not SUSTAINED: only " + fannedOut + " of "
+                        + ticks + " fused ticks fanned out (" + fallbacks + " stood down). "
+                        + "The thread probe describes one section, so without this the gate "
+                        + "would pass on a single fanned-out tick at the end of a serial run");
+            }
+            if (unready != 0 || memoryReach != 0 || unreadyBe != 0) {
+                helper.fail("Fused path deferred work this rig cannot justify: unready="
+                        + unready + " memoryReach=" + memoryReach + " unreadyBe=" + unreadyBe
+                        + ". Chunks are force-loaded and the only mob is an armour stand, so "
+                        + "no absent-neighbour or memory-reach deferral is possible here");
             }
             if (!laneA.equals(controlA.get()) || !laneB.equals(controlB.get())) {
                 helper.fail("FUSED E1 EQUIVALENCE FAILURE\nA control=" + controlA.get()

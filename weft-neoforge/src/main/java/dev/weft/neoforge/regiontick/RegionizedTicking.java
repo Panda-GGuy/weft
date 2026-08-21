@@ -913,18 +913,38 @@ public final class RegionizedTicking {
                                                boolean shardThisTick) {
         fusedCurrentRegion.set(regionId);
         try {
-        units.fresh.tick(BlockEntity::isRemoved, blockEntity -> {
+        // Fresh block entities are CONSUMED, not ticked. PendingUnits.tick only
+        // prunes a unit when its `removed` predicate says so, and a block entity
+        // that loaded successfully is never isRemoved() - so tick() left every
+        // fresh unit in the container permanently. Two bugs came out of that:
+        //
+        //   1. onLoad() ran again on every subsequent tick, forever. Vanilla
+        //      calls it exactly once, and NeoForge's onLoad invalidates
+        //      capabilities, so this was per-tick capability thrash on every
+        //      block entity the level had ever loaded.
+        //   2. `fresh` never emptied, so `hasFresh` below stayed true forever
+        //      and the fused path stood down from fan-out PERMANENTLY after the
+        //      first block entity placement - parallel regions silently became
+        //      serial for the rest of the session.
+        //
+        // Draining is also the correct re-entrancy shape: an onLoad that
+        // registers another fresh block entity adds to a now-empty container
+        // and is handled on the next tick, which is the deferral tick() gave.
+        List<BlockEntity> freshNow = units.fresh.drainAll();
+        if (!freshNow.isEmpty()) {
             fusedCurrentUnits.set(units);
             fusedPhase.set(FusedPhase.FRESH);
             try {
-                if (blockEntity.hasLevel()) {
-                    blockEntity.onLoad();
+                for (BlockEntity blockEntity : freshNow) {
+                    if (!blockEntity.isRemoved() && blockEntity.hasLevel()) {
+                        blockEntity.onLoad();
+                    }
                 }
             } finally {
                 fusedPhase.remove();
                 fusedCurrentUnits.remove();
             }
-        });
+        }
         if (!units.afterFreshTickers.isEmpty()) {
             for (BeTickUnit unit : units.afterFreshTickers) {
                 units.tickers.add(unit);
