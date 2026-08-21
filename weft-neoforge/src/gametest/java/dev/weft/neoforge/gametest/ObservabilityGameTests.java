@@ -6,7 +6,6 @@ import dev.weft.engine.telemetry.TickSample;
 import dev.weft.neoforge.WeftConfig;
 import dev.weft.neoforge.activation.ActivationHooks;
 import dev.weft.neoforge.coexist.WeftModules;
-import dev.weft.neoforge.mixin.EntityCounterAccessor;
 import dev.weft.neoforge.observability.WeftObservability;
 import dev.weft.neoforge.path.PathfindingHooks;
 import dev.weft.neoforge.profiler.WeftProfiler;
@@ -92,15 +91,6 @@ public class ObservabilityGameTests {
 
         AtomicReference<String> scrape = new AtomicReference<>();
         int port = freePort();
-        // ParityScenario.build pins vanilla's global entity-id counter to a fixed
-        // base, because entity ids leak into behaviour wherever vanilla staggers
-        // work by id and the digest harness needs two runs to match. Borrowing the
-        // arena therefore borrows a rewound counter, and a later test spawning a
-        // large population reuses ids that are still tracked - which is exactly
-        // how this test first broke p1EndToEndMspt with "Entity is already
-        // tracked!". We restore it forward on the way out.
-        int entityCounterBefore = EntityCounterAccessor.weft$entityCounter().get();
-
         helper.runAfterDelay(SETTLE_TICKS, () -> {
             ParityScenario.reset(level, base);
             ParityScenario.build(level, base);
@@ -118,7 +108,6 @@ public class ObservabilityGameTests {
             } catch (IOException e) {
                 stopExporter();
                 tearDown(level, base);
-                restoreEntityCounter(entityCounterBefore);
                 helper.fail("Scrape failed against the module's own bound port: " + e);
                 return;
             }
@@ -134,8 +123,6 @@ public class ObservabilityGameTests {
 
             stopExporter();
             tearDown(level, base);
-            restoreEntityCounter(entityCounterBefore);
-
             // --- vacuous-run guard, before any agreement is trusted ---
             if (profiler.ticks == 0) {
                 helper.fail("Vacuous run: the profiler window holds no completed ticks, so "
@@ -448,16 +435,6 @@ public class ObservabilityGameTests {
             // and promtool has its own CI step that will notice a missing file.
             System.err.println("Weft: could not write " + SCRAPE_FILE + ": " + e);
         }
-    }
-
-    /**
-     * Push vanilla's entity-id counter forward past everything this arena
-     * created, so no later test can be handed an id that is still in use.
-     * Monotone on purpose: winding it back would recreate the collision.
-     */
-    private static void restoreEntityCounter(int before) {
-        var counter = EntityCounterAccessor.weft$entityCounter();
-        counter.set(Math.max(before, counter.get()));
     }
 
     private static void tearDown(ServerLevel level, BlockPos base) {

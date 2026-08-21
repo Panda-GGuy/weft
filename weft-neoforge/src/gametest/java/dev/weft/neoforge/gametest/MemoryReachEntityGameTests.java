@@ -14,6 +14,9 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.ai.navigation.PathNavigation;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.neoforged.neoforge.gametest.GameTestHolder;
 import net.neoforged.neoforge.gametest.PrefixGameTestTemplate;
@@ -131,6 +134,98 @@ public class MemoryReachEntityGameTests {
             if (unmapped != 0) {
                 helper.fail("unmapped units moved by " + unmapped + " - hazard-25 deferrals must "
                         + "be counted as unready, never as unmapped (that invariant must stay 0)");
+                return;
+            }
+            helper.succeed();
+        });
+    }
+
+    /** Hazard 21: a real villager/door navigation invalidation must defer and drain on main. */
+    @GameTest(template = "empty", batch = "p2navdefer", timeoutTicks = 1200)
+    public void villagerDoorNavigationUpdateDefersAfterParallelJoin(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        BlockPos ground = WeftBenchGameTests.groundOrigin(helper);
+        BlockPos columnA = new BlockPos(ground.getX() - 64, 0, ground.getZ() + 64);
+        BlockPos columnB = new BlockPos(columnA.getX(), 0,
+                columnA.getZ() + ISLAND_GAP_CHUNKS * 16);
+        WeftBenchGameTests.forceChunks(level, columnA, true);
+        WeftBenchGameTests.forceChunks(level, columnB, true);
+        BlockPos baseA = surface(level, columnA);
+        BlockPos baseB = surface(level, columnB);
+
+        ActivationHooks.setActive(false);
+        PathfindingHooks.setActive(false);
+        SpawnDensityHooks.setActive(false);
+        LegacyRouting.setActive(false);
+
+        List<Mob> mobs = new ArrayList<>();
+        long[] baseline = new long[4];
+        BlockPos lowerDoor = baseB.offset(8, 1, 8);
+        helper.runAfterDelay(1, () -> {
+            spawn(level, baseA, EntityType.ZOMBIE, ZOMBIES, mobs);
+            spawn(level, baseB, EntityType.VILLAGER, VILLAGERS, mobs);
+            for (Mob mob : mobs) {
+                PathNavigation navigation = mob.getNavigation();
+                navigation.moveTo(lowerDoor.getX() + 0.5, lowerDoor.getY(),
+                        lowerDoor.getZ() + 0.5, 1.0);
+            }
+            level.setBlock(lowerDoor.below(), Blocks.SMOOTH_STONE.defaultBlockState(),
+                    Block.UPDATE_CLIENTS);
+            level.setBlock(lowerDoor, Blocks.OAK_DOOR.defaultBlockState(),
+                    Block.UPDATE_CLIENTS);
+            baseline[0] = RegionizedTicking.deferredNavigationUpdates();
+            baseline[1] = RegionizedTicking.completedNavigationUpdates();
+            baseline[2] = RegionizedTicking.misplacedNavigationUpdates();
+            // Hazard 25's OWN counter, not unreadyUnits: that total also counts
+            // border-chunk and block-entity deferrals, either of which can clear
+            // a villager-shaped threshold with no villager ever classified.
+            baseline[3] = RegionizedTicking.memoryReachUnits();
+            RegionizedTicking.setActive(true);
+            RegionizedTicking.setPartitioned(true);
+            RegionizedTicking.setParallel(true);
+        });
+
+        helper.runAfterDelay(SETTLE_TICKS, () -> {
+            if (!RegionizedTicking.runNavigationUpdateProbe(level, () ->
+                    level.sendBlockUpdated(lowerDoor, Blocks.OAK_DOOR.defaultBlockState(),
+                            Blocks.AIR.defaultBlockState(), Block.UPDATE_ALL))) {
+                helper.fail("Navigation deferral probe could not engage parallel mode");
+                return;
+            }
+        });
+
+        helper.runAfterDelay(SETTLE_TICKS + 8, () -> {
+            long deferred = RegionizedTicking.deferredNavigationUpdates() - baseline[0];
+            long completed = RegionizedTicking.completedNavigationUpdates() - baseline[1];
+            long misplaced = RegionizedTicking.misplacedNavigationUpdates() - baseline[2];
+            long serialVillagerTicks = RegionizedTicking.memoryReachUnits() - baseline[3];
+            String[] threads = RegionizedTicking.lastEntityPartitionThreads();
+            String serverThread = level.getServer().getRunningThread().getName();
+            long regionA = regionIdAt(level, baseA);
+            long regionB = regionIdAt(level, baseB);
+            tearDown(level, columnA, columnB, mobs);
+
+            if (regionA < 0 || regionB < 0 || regionA == regionB || threads.length < 2
+                    || java.util.Arrays.stream(threads)
+                    .anyMatch(thread -> thread == null || thread.equals(serverThread))) {
+                helper.fail("Navigation deferral gate never engaged two-region fan-out: A="
+                        + regionA + " B=" + regionB + " threads="
+                        + java.util.Arrays.toString(threads));
+                return;
+            }
+            if (deferred < 1 || completed != deferred) {
+                helper.fail("Door update did not traverse section-end deferral: deferred="
+                        + deferred + " completed=" + completed);
+                return;
+            }
+            if (misplaced != 0) {
+                helper.fail(misplaced + " deferred navigation updates ran off server thread");
+                return;
+            }
+            if (serialVillagerTicks < VILLAGERS) {
+                helper.fail("Villager/Brain serial tail did not engage while worker fan-out ran: "
+                        + "memory-reach classifications=" + serialVillagerTicks
+                        + " expected >=" + VILLAGERS);
                 return;
             }
             helper.succeed();
