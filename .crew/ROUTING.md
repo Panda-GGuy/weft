@@ -94,6 +94,73 @@ If one agent both **plans** and **codes** in the same session:
 5. Launcher/orchestrator must relaunch a stopped process on next fallback using same worktree and prompt. Never reset or clean dirty state during failover.
 6. Record selected fallback in session status so next context knows route changed.
 
+### Automated launcher failover (implemented)
+
+`scripts/crew/launch-watched-agent.ps1` walks an ordered profile chain per agent
+instead of dying on the first provider fault. Verified live: a dead
+`ds-deepseek-v4-pro` first hop auto-advanced to `cx-gpt-5-6-sol-high` and the
+agent finished with `exit=0`.
+
+Failover triggers on: `402` / Payment Required / Insufficient Balance,
+`No active credentials`, `invalid_api_key`, `Unauthorized`, expired-token text,
+missing/unsupported model, and Codex `exceeded retry limit` (post-429).
+
+Also implemented:
+- Missing profile files are skipped before launch (OmniRoute renames do not burn attempts).
+- Route switches appended to `.crew/memory/_session/logs/route-failover.log`.
+- Final profile + exit code recorded in `<agent>-watchdog-agent.pid`.
+- A genuine task failure on a healthy route stops the chain instead of masking bugs.
+
+### Route health is measured, not assumed
+
+`python scripts/crew/probe-routes.py` sends a one-word prompt through each
+profile and classifies the JSON event stream. **The catalog lies:** it advertises
+routes that never answer. Probe results 2026-08-20 (5/18 of the first candidate
+set were usable):
+
+| Provider | Prefix | Probe result |
+|---|---|---|
+| codex | `cx/` | **HEALTHY** |
+| claude | `cc/` | **HEALTHY** (except Fable 5) |
+| xai-oauth | `xao/` | **HEALTHY** |
+| github | `gh/`, `github/` | DEAD — `model-missing` on every id |
+| antigravity | `aug/` | DEAD — upstream `502` |
+| grok-cli | `gc/` | DEAD — stream timeout |
+| tllm | `tllm/` | DEAD — `403`, egress IP blocked by Vercel |
+| deepseek | `ds/` | DEAD — `no-credentials` (quota reset pending) |
+| opencode | `oc/` | DEAD — `unauthorized` (quota reset pending) |
+| claude Fable 5 | `cc/claude-fable-5` | DEAD — `rate-limited` (quota reset pending) |
+
+Because only three pools answer, chain depth comes from spanning **both provider
+and model** inside those pools. Verified-usable routes:
+`cx-gpt-5-6-sol-high`, `cx-gpt-5-6-sol`, `cx-gpt-5-6-terra`, `cx-gpt-5-6-luna`,
+`cx-gpt-5-5`, `cc-claude-sonnet-5`, `cc-claude-sonnet-4-6`, `cc-claude-opus-5`,
+`cc-claude-opus-4-8`, `cc-claude-opus-4-7`, `xao-grok-4-5`, `xao-grok-4-3`,
+`xao-grok-4-20-0309-reasoning`.
+
+### Current chains (probe-verified)
+
+| Agent | Chain |
+|---|---|
+| lead | `cx-gpt-5-6-sol-high` -> `cc-claude-sonnet-5` -> `xao-grok-4-5` -> `cx-gpt-5-6-terra` -> `cc-claude-sonnet-4-6` -> `xao-grok-4-3` -> `cc-claude-fable-5`\* |
+| neoforge | `cx-gpt-5-6-sol-high` -> `cc-claude-opus-5` -> `cx-gpt-5-6-terra` -> `cc-claude-opus-4-8` -> `xao-grok-4-5` -> `cx-gpt-5-6-luna` -> `cc-claude-fable-5`\* |
+| parity | `cx-gpt-5-6-sol-high` -> `cc-claude-sonnet-5` -> `cc-claude-opus-5` -> `xao-grok-4-20-0309-reasoning` -> `cx-gpt-5-6-terra` -> `cc-claude-opus-4-7` -> `xao-grok-4-5` |
+| release | `cx-gpt-5-6-sol-high` -> `cc-claude-sonnet-5` -> `cx-gpt-5-5` -> `cc-claude-sonnet-4-6` -> `xao-grok-4-5` -> `cx-gpt-5-6-luna` -> `xao-grok-4-3` |
+
+\* quota-limited today; kept last so it resumes automatically after reset.
+
+### Keeping profiles in sync
+
+`python scripts/crew/sync-codex-profiles.py` reconciles `~/.codex/*.config.toml`
+against the live catalog (created 149 profiles when github/antigravity appeared).
+Run it after OmniRoute changes, then re-run `probe-routes.py` before trusting any
+newly added provider in a chain.
+
+**DeepSeek note (2026-08-20):** `ds/*` tokens expired mid-run (`402 Insufficient
+Balance`, then `404 No active credentials`). DeepSeek is removed from all default
+chains until credentials are re-verified. Do not restore `DS_FLASH` as a primary
+for `weft-release`.
+
 ## Combos (created in OmniRoute 2026-08-20)
 
 | Combo | Steps | Intent |

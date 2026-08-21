@@ -1,0 +1,65 @@
+{
+  "workspace": "C:/Users/Panda/weft",
+  "logDirectory": "C:/Users/Panda/weft/.crew/memory/_session/logs",
+  "intervalSeconds": 20,
+  "minFreeDiskGb": 2.0,
+  "targets": [
+    {
+      "name": "lab-server-on",
+      "enabled": false,
+      "processMatch": "net.neoforged.devlaunch.Main",
+      "probe": "python scripts/chaos/rcon.py 25575 weft-bench list",
+      "probeTimeoutSeconds": 12,
+      "failureThreshold": 3,
+      "terminateOnFailedProbe": true,
+      "restartCommand": "gradlew.bat :weft-neoforge:runServer -PwithNeoForge --console=plain",
+      "cooldownSeconds": 300,
+      "maxRestartsPerWindow": 1,
+      "restartWindowSeconds": 3600
+    },
+    {
+      "name": "agent-lead",
+      "enabled": true,
+      "processMatch": "weft-wt-lead",
+      "completionFile": "C:/Users/Panda/weft-wt-lead/.crew/memory/_session/watchdog-lastmsg.txt",
+      "failureThreshold": 2,
+      "restartCommand": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\\crew\\launch-watched-agent.ps1 -Agent lead",
+      "cooldownSeconds": 180,
+      "maxRestartsPerWindow": 2,
+      "restartWindowSeconds": 3600
+    },
+    {
+      "name": "agent-neoforge",
+      "enabled": true,
+      "processMatch": "weft-wt-neoforge",
+      "completionFile": "C:/Users/Panda/weft-wt-neoforge/.crew/memory/_session/watchdog-lastmsg.txt",
+      "failureThreshold": 2,
+      "restartCommand": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\\crew\\launch-watched-agent.ps1 -Agent neoforge",
+      "cooldownSeconds": 180,
+      "maxRestartsPerWindow": 2,
+      "restartWindowSeconds": 3600
+    },
+    {
+      "name": "agent-parity",
+      "enabled": true,
+      "processMatch": "weft-wt-parity",
+      "completionFile": "C:/Users/Panda/weft-wt-parity/.crew/memory/_session/watchdog-lastmsg.txt",
+      "failureThreshold": 2,
+      "restartCommand": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\\crew\\launch-watched-agent.ps1 -Agent parity",
+      "cooldownSeconds": 180,
+      "maxRestartsPerWindow": 2,
+      "restartWindowSeconds": 3600
+    },
+    {
+      "name": "agent-release",
+      "enabled": true,
+      "processMatch": "weft-wt-release",
+      "completionFile": "C:/Users/Panda/weft-wt-release/.crew/memory/_session/watchdog-lastmsg.txt",
+      "failureThreshold": 2,
+      "restartCommand": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\\crew\\launch-watched-agent.ps1 -Agent release",
+      "cooldownSeconds": 300,
+      "maxRestartsPerWindow": 1,
+      "restartWindowSeconds": 3600
+    }
+  ]
+}
