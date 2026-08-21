@@ -46,6 +46,32 @@
   reports for this specific stack shape and add to the list on sight.
 
 ## Lessons
+
+- 2026-08-20 (#6 / `p2evictionchurn` attempt, FAILED - read before retrying):
+  five consecutive rig designs could not make a chunk absent at radius 1 next to
+  a ticking chunk inside a GameTest. Every attempt failed the SAME way, on the
+  precondition rather than the assertion: "west neighbour is resident".
+  Tried, all rejected by evidence:
+    1. neighbour inside `WeftBenchGameTests.forceChunks` radius-10 grid -> the
+       grid's own FORCED ticket keeps it resident; releasing ours changes nothing
+    2. boundary moved to the grid's west edge -> still resident
+    3. release ticket + `chunkSource.tick(() -> false, true)` to force a sweep
+       -> still resident within the phase window
+    4. own radius-`GRID` forced grid extending east/south only, 4096 blocks away
+       from other arenas -> still resident
+  Root cause is structural, and RFC-0006 hazard 22 already states it: vanilla
+  guarantees radius-2 generated `ChunkStatus.FULL` around any entity-ticking
+  chunk. A ticking rig therefore KEEPS its radius-2 neighbourhood loaded by
+  construction. Hazard 24's real precondition is a chunk that was resident and
+  then evicted *while the owner kept ticking* - which needs the ticket churn of
+  a teleport or a pre-generator sweep, i.e. exactly what the issue reported and
+  what a forced-grid gametest cannot express.
+  Do NOT weaken the assertion to make it pass; a gate that cannot reach its own
+  precondition proves nothing. Next attempt should drive real ticket churn (a
+  moving player ticket, or Chunky-style sweep) or move to a soak-style harness.
+  `unreadyBlockEntityUnits()` was added and kept - hazard 24's own counter,
+  separate from the 3-cause `unreadyUnits` total, so whatever gate finally lands
+  can assert THIS cause. #6 stays OPEN.
 - 2026-08-20 (review of own #3 gate): the first `p2navdefer` revision asserted
   the villager serial tail by reading `unreadyUnits`, which is incremented by
   THREE causes - memory-reach entities, entities whose read neighbourhood is not
