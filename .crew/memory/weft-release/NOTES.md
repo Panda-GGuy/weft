@@ -13,6 +13,9 @@
 - Merge order checkpoint: #13 first; #15 only after draft removal/review; #14 last and only after current-head parity rereview plus non-vacuous fused/fallback gates. #14 head advanced from reviewed `432f831` to `1bf784c` with fallback-order fixes, so old review findings cannot be marked resolved without rereview. Current merge simulation found no textual conflicts, and all three carry identical shared PROJECT/BACKLOG/NEXT-QUEUE blobs.
 
 ## Lessons
+- 2026-08-20: after PR #19 merged, retire the superseded release branch and
+  start commit-duty follow-ups from current `origin/main`; a missing worktree
+  `.git` file means the named directory is an orphan, not a branch checkout.
 - 2026-08-20: fair equal-heap ON/OFF Stressmark is tied and must be archived as
   field evidence, not as default-ON clearance. Keep ship posture NOT READY.
   Prefer merge/close of docs PRs over leaving superseded open PRs around.
