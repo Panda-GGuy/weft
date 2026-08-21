@@ -1,14 +1,22 @@
 ﻿# weft-parity commit report
 
 - Branch: `crew/parity-close`
-- SHA: `b68acc2001a9461293eccbd94b7fb487d830e872` (`p2navdefer` code);
-  follow-up checkpoint SHA recorded by this report commit.
+- Rebased head before this report: `886fc71dc49fbfb71dccccf9cc05cf11bd555be6`.
+- Base: `origin/main` at `a50886b4582718e2126d93e5ed0117493ab33d2f`.
+- Report commit SHA: recorded in PR #15 head and push output; commit cannot
+  embed its own SHA without changing that SHA.
 - Increment: hazard-21 `p2navdefer` gate, measured navigation-deferral path,
   and honest equal-heap evidence checkpoint.
 - Default posture: unchanged. Regionized, partitioned, and parallel ticking remain default OFF; no default-ON approval granted.
 
 ## Commands run
 
+- `git fetch origin --prune` — passed.
+- `git rebase origin/main` — passed; shared-memory conflicts in
+  `.crew/memory/shared/BACKLOG.md` and `.crew/memory/shared/PROJECT.md` resolved
+  by taking `origin/main` versions as required.
+- `.\gradlew.bat :weft-neoforge:compileGametestJava -PwithNeoForge` — passed
+  after rebase (`BUILD SUCCESSFUL in 6s`).
 - `git diff --check` â€” passed.
 - `.\gradlew.bat clean -PwithNeoForge --no-daemon` â€” passed; removed only
   generated build outputs from this worktree.
