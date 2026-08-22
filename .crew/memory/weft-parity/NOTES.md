@@ -108,6 +108,35 @@
   them; keep allocator monotonic. `ChunkMap.addEntity` duplicate means numeric
   id collision, not necessarily same UUID/entity.
 
+- 2026-08-22 (#6 / `p2evictionchurn` attempt 6, FAILED - root cause now
+  structural, not empirical): tried a two-independent-ticket-source design
+  (permanent FORCED ticket on the block-entity chunk + a transient LoadBot
+  join/leave on the read-neighbour) specifically to dodge attempts 1-4's
+  shared-forced-grid failure mode. Still failed on the same precondition
+  ("west chunk still resident"), and this time read vanilla's own decompiled
+  source (`net.minecraft.server.level.ChunkLevel`/`DistanceManager`) to find
+  out why: chunk ticket propagation is MONOTONIC per sustained source - a
+  `FORCED` (or `PLAYER`) ticket on chunk C always keeps every radius-1
+  neighbour at minimum `BLOCK_TICKING` for as long as that one ticket exists,
+  independent of grid shape. This generalises attempts 1-4's finding (a forced
+  grid's own border regenerates) to ANY single sustained ticket source,
+  forced-grid or not. Conclusion: no arena kept alive by one ticket source can
+  ever see its own neighbour evicted - it structurally cannot happen. The real
+  crash needs the block-entity chunk and its neighbour on TWO DIFFERENT,
+  ASYMMETRICALLY-DECAYING sources (a moving player's view-distance ring is the
+  natural case: trailing edge decays before the leading edge advances). That
+  is inherently a multi-tick, movement-driven race, not a static two-source
+  arena. PR #29 (draft) has the attempt + full writeup; issue #6 commented.
+  Next attempt needs an actually-MOVING LoadBot tracing a real view-distance
+  boundary crossing, not a join/leave pair - meaningfully harder to land the
+  race window correctly. Given 6 attempts across two sessions, worth weighing
+  against falling back to `scripts/lab/eviction-repro.py`'s manual rcon repro
+  as standing evidence, with an explicit documented gap on GameTest automation,
+  rather than continued agent-hours on attempt 7+.
+
 ## Next
 - Q1/Q2: after increment-7 7c lands, add `p2fuse`; then build `p2navdefer` and
   `p2evictionchurn` so #3/#6 can close honestly without lead intervention.
+  `p2evictionchurn` specifically may need a lead decision: continue chasing a
+  moving-ticket GameTest design, or accept the manual rcon repro as evidence
+  and document the automation gap (see 2026-08-22 lesson above).
