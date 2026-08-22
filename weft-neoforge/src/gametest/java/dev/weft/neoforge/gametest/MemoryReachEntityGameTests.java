@@ -82,6 +82,17 @@ public class MemoryReachEntityGameTests {
 
         List<Mob> mobs = new ArrayList<>();
         long[] baseline = new long[2];
+        // Sustained fan-out, sampled every tick of the run rather than only at
+        // the check point. lastEntityPartition() is a global last-SECTION
+        // probe: it can legitimately read one bucket for a single tick (e.g. a
+        // topology recheck straddling a chunk-load boundary) while every other
+        // tick in the window fanned out fine. A gate reading only the final
+        // snapshot inherits whatever transient state that one tick happened to
+        // leave, which is exactly the batch-order flake this file's own memory
+        // notes record (adding a new GameTest batch reshuffles run order and
+        // reveals it). Sampling across the whole window makes the assertion
+        // about what this test's own rig actually did, not about one instant.
+        boolean[] sawTwoBucketsWithBothRegions = new boolean[1];
 
         helper.runAfterDelay(1, () -> {
             // Zombies in region A: goal-based AI, no position memories, must bucket.
@@ -95,10 +106,22 @@ public class MemoryReachEntityGameTests {
             RegionizedTicking.setParallel(true);
         });
 
+        for (int tick = SETTLE_TICKS; tick < SETTLE_TICKS + RUN_TICKS; tick++) {
+            helper.runAfterDelay(tick, () -> {
+                long regionA = regionIdAt(level, baseA);
+                long regionB = regionIdAt(level, baseB);
+                long[] partition = RegionizedTicking.lastEntityPartition();
+                if (regionA >= 0 && regionB >= 0 && regionA != regionB
+                        && partition.length >= 2
+                        && contains(partition, regionA) && contains(partition, regionB)) {
+                    sawTwoBucketsWithBothRegions[0] = true;
+                }
+            });
+        }
+
         helper.runAfterDelay(SETTLE_TICKS + RUN_TICKS, () -> {
             long deferred = RegionizedTicking.unreadyUnits() - baseline[0];
             long unmapped = RegionizedTicking.unmappedUnits() - baseline[1];
-            long[] partition = RegionizedTicking.lastEntityPartition();
             long regionA = regionIdAt(level, baseA);
             long regionB = regionIdAt(level, baseB);
             int alive = (int) mobs.stream().filter(m -> !m.isRemoved()).count();
@@ -109,9 +132,10 @@ public class MemoryReachEntityGameTests {
                         + regionB + ") - the section would not fan out, so this proves nothing");
                 return;
             }
-            if (partition.length < 2) {
-                helper.fail("Entity section ran " + partition.length + " bucket(s); with mobs in "
-                        + "both islands it must fan out or the gate is untested");
+            if (!sawTwoBucketsWithBothRegions[0]) {
+                helper.fail("Entity section never ran both island regions as distinct buckets "
+                        + "across the run window; with mobs in both islands it must fan out or "
+                        + "the gate is untested");
                 return;
             }
             if (alive < mobs.size()) {
@@ -258,6 +282,15 @@ public class MemoryReachEntityGameTests {
     private static long regionIdAt(ServerLevel level, BlockPos pos) {
         var region = RegionTopology.managerFor(level).regionAtBlock(pos.getX(), pos.getZ());
         return region == null ? -1L : region.id();
+    }
+
+    private static boolean contains(long[] ids, long id) {
+        for (long candidate : ids) {
+            if (candidate == id) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static void tearDown(ServerLevel level, BlockPos columnA, BlockPos columnB,
