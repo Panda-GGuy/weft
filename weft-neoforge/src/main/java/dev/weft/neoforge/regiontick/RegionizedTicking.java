@@ -107,6 +107,30 @@ public final class RegionizedTicking {
     private static final LongAdder fusedRegions = new LongAdder();
     /** Fused ticks that stood down from fan-out (fallback path engagement). */
     private static final LongAdder fusedSerialFallbacks = new LongAdder();
+    /**
+     * Fresh block-entity {@code onLoad()} invocations under the fused path.
+     *
+     * <p>Regression counter for the fresh-BE bug fixed in {@code 1aff76c}:
+     * {@code PendingUnits.tick} never drains a unit that is not
+     * {@code isRemoved()}, so a fresh block entity that loaded successfully
+     * was re-onLoad()'d every tick forever instead of exactly once. A gate
+     * that only checks the furnace still lights cannot see per-tick thrash -
+     * onLoad is idempotent from the furnace's own state's point of view. This
+     * counter makes the call count itself the assertion.
+     */
+    private static final LongAdder fusedFreshOnLoadCalls = new LongAdder();
+    /**
+     * Wall-clock span (nanoTime) of each fused region task's mail-drain start
+     * to its block-entity stage end, indices parallel to
+     * {@link #lastEntityPartition()}. Increment-7's claim (RFC-0007 sec. 4) is
+     * that a region runs free of every other region's stages within the join
+     * - "ran on different threads" alone does not prove that; two buckets can
+     * run on different threads back-to-back with no actual overlap. This is
+     * the deterministic, non-vacuous version: real overlapping intervals,
+     * captured every fused tick, not inferred from an absence of a barrier.
+     */
+    private static volatile long[] lastFusedStageStartNanos = new long[0];
+    private static volatile long[] lastFusedStageEndNanos = new long[0];
 
     /** Region ids of the most recent partitioned sections (gametest probes). */
     private static volatile long[] lastEntityPartition = new long[0];
@@ -430,6 +454,9 @@ public final class RegionizedTicking {
         fusedTicks.reset();
         fusedSerialFallbacks.reset();
         fusedRegions.reset();
+        fusedFreshOnLoadCalls.reset();
+        lastFusedStageStartNanos = new long[0];
+        lastFusedStageEndNanos = new long[0];
     }
 
     /**
@@ -796,6 +823,12 @@ public final class RegionizedTicking {
         List<WeftScheduler.FusedRegionTask> tasks = new ArrayList<>();
         long[] partition = new long[byRegion.size()];
         String[] threads = new String[byRegion.size()];
+        // Stage-overlap proof (RFC-0007 sec. 4): real wall-clock start/end per
+        // region task, not merely "ran on a different thread". Two buckets on
+        // different threads back-to-back never overlap; this is the
+        // deterministic signal p2fuse's overlap assertion reads.
+        long[] stageStart = new long[byRegion.size()];
+        long[] stageEnd = new long[byRegion.size()];
         int index = 0;
         for (var entry : byRegion.entrySet()) {
             long regionId = entry.getKey();
@@ -807,6 +840,7 @@ public final class RegionizedTicking {
             tasks.add(new WeftScheduler.FusedRegionTask(regionId, List.of(
                     () -> {
                         threads[threadIndex] = Thread.currentThread().getName();
+                        stageStart[threadIndex] = System.nanoTime();
                         if (runParallel) {
                             ParallelAccess.enterWorker();
                         }
@@ -845,6 +879,7 @@ public final class RegionizedTicking {
                             tickFusedBlockEntities(engine, regionId, levelUnits, units,
                                     shardThisTick);
                         } finally {
+                            stageEnd[threadIndex] = System.nanoTime();
                             if (runParallel) {
                                 ParallelAccess.exitWorker();
                             }
@@ -861,6 +896,8 @@ public final class RegionizedTicking {
         lastBlockEntityPartition = partition.clone();
         lastEntityPartitionThreads = threads;
         lastBlockEntityPartitionThreads = threads.clone();
+        lastFusedStageStartNanos = stageStart;
+        lastFusedStageEndNanos = stageEnd;
         lastBlockEntityUnits = byRegion.values().stream()
                 .mapToInt(value -> value.tickers.size()).sum();
     }
@@ -938,6 +975,7 @@ public final class RegionizedTicking {
                 for (BlockEntity blockEntity : freshNow) {
                     if (!blockEntity.isRemoved() && blockEntity.hasLevel()) {
                         blockEntity.onLoad();
+                        fusedFreshOnLoadCalls.increment();
                     }
                 }
             } finally {
@@ -1403,6 +1441,28 @@ public final class RegionizedTicking {
      */
     public static long fusedSerialFallbacks() {
         return fusedSerialFallbacks.sum();
+    }
+
+    /** Fresh block-entity {@code onLoad()} calls under the fused path (regression counter). */
+    public static long fusedFreshOnLoadCalls() {
+        return fusedFreshOnLoadCalls.sum();
+    }
+
+    /**
+     * Wall-clock nanoTime spans of the most recent fused section's region
+     * tasks, index-aligned with {@link #lastEntityPartition()}: start is the
+     * region's mail-drain entry, end is its block-entity stage exit. Deliberate
+     * evidence for the "regions run free of each other" claim (RFC-0007 sec.
+     * 4) instead of inferring it from distinct thread names, which two
+     * sequential (non-overlapping) buckets on different threads would also
+     * satisfy.
+     */
+    public static long[] lastFusedStageStartNanos() {
+        return lastFusedStageStartNanos.clone();
+    }
+
+    public static long[] lastFusedStageEndNanos() {
+        return lastFusedStageEndNanos.clone();
     }
 
     /**

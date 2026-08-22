@@ -375,6 +375,9 @@ public class PartitionedTickingGameTests {
                 helper.fail("Fused parallel fan-out did not engage: " + Arrays.toString(threads));
             }
 
+            long[] stageStart = RegionizedTicking.lastFusedStageStartNanos();
+            long[] stageEnd = RegionizedTicking.lastFusedStageEndNanos();
+
             LOGGER.info("p2fuse: fusedTicks={} regions={} fannedOut={} standDown={} "
                     + "unready={} memoryReach={} unreadyBe={}",
                     ticks, regions, fannedOut, fallbacks, unready, memoryReach, unreadyBe);
@@ -396,10 +399,188 @@ public class PartitionedTickingGameTests {
                         + ". Chunks are force-loaded and the only mob is an armour stand, so "
                         + "no absent-neighbour or memory-reach deferral is possible here");
             }
+            // Deterministic cross-region STAGE-OVERLAP proof (RFC-0007 sec. 4):
+            // "region A's last stage may complete while region B's first stage
+            // is still running" is a claim about real wall-clock intervals, not
+            // about thread identity. Two buckets that ran on different threads
+            // but never overlapped (e.g. handed to the pool one after another
+            // with no free worker) would satisfy every assertion above while
+            // failing the actual free-running claim. This checks real interval
+            // overlap between at least one pair of the final section's regions.
+            if (stageStart.length != threads.length || stageEnd.length != threads.length) {
+                helper.fail("Stage-timing probe size mismatch: starts=" + stageStart.length
+                        + " ends=" + stageEnd.length + " threads=" + threads.length);
+            }
+            boolean anyPairOverlapped = false;
+            for (int a = 0; a < stageStart.length && !anyPairOverlapped; a++) {
+                for (int b = a + 1; b < stageStart.length; b++) {
+                    if (stageStart[a] < stageEnd[b] && stageStart[b] < stageEnd[a]) {
+                        anyPairOverlapped = true;
+                        break;
+                    }
+                }
+            }
+            if (stageStart.length >= 2 && !anyPairOverlapped) {
+                helper.fail("No two fused region tasks in the final section overlapped in "
+                        + "wall-clock time (starts=" + Arrays.toString(stageStart) + " ends="
+                        + Arrays.toString(stageEnd) + ") - fan-out ran, but sequentially, which "
+                        + "is not the increment-7 claim");
+            }
+            // PENDING-UNIT assertion: this rig's furnaces have persistent
+            // tickers captured every tick by the fused BE stage (not "fresh"
+            // one-shot work), so the pending-ticker containers must be
+            // non-empty every fused tick, proving the per-region PendingUnits
+            // containers (RFC-0007 sec. 4 item 1) are the real, live path -
+            // not a code path that happens to compile but is never populated.
+            int lastBlockEntityUnits = RegionizedTicking.lastBlockEntityUnits();
+            if (lastBlockEntityUnits < 2) {
+                helper.fail("Fused BE stage's pending-unit containers held only "
+                        + lastBlockEntityUnits + " units in the final section - expected >=2 "
+                        + "(one furnace ticker per island). Per-region PendingUnits containers "
+                        + "are not carrying the persistent tickers RFC-0007 sec. 4 item 1 "
+                        + "requires");
+            }
             if (!laneA.equals(controlA.get()) || !laneB.equals(controlB.get())) {
                 helper.fail("FUSED E1 EQUIVALENCE FAILURE\nA control=" + controlA.get()
                         + " fused=" + laneA + "\nB control=" + controlB.get()
                         + " fused=" + laneB);
+            }
+            helper.succeed();
+        });
+    }
+
+    /**
+     * FORCED entity/BE fallback assertion for {@code p2fuse} (RFC-0007 sec. 4).
+     *
+     * <p>The steady-state {@code p2fuse} gate above proves fan-out is
+     * SUSTAINED in the common case; it cannot prove the stand-down path
+     * itself works, because a healthy rig never takes it — {@code
+     * fusedSerialFallbacks} reads zero for the entire run, which is
+     * indistinguishable from a broken counter that can never increment (see
+     * {@code .crew/memory/weft-neoforge/NOTES.md}, 2026-08-21). This test
+     * forces the disturbance instead of hoping for it: with fused parallel
+     * ticking already engaged and fanning out, it places a brand-new furnace
+     * (fresh block entity → {@code hasFresh} → the fused path deliberately
+     * keeps that tick on the server thread, since NeoForge {@code onLoad} may
+     * mutate level-wide structures). Asserted:
+     * <ol>
+     *   <li>fan-out was engaged BEFORE the disturbance — otherwise there is no
+     *       stand-down to observe, only an absence;</li>
+     *   <li>{@code fusedSerialFallbacks} moved at least once after it;</li>
+     *   <li>{@code fusedFreshOnLoadCalls} moved by exactly one per fresh block
+     *       entity placed — not zero (the seam never fired) and not more than
+     *       once per placement per tick (the {@code 1aff76c} regression:
+     *       {@code onLoad} re-firing every tick forever because the fresh
+     *       container was never drained);</li>
+     *   <li>the stand-down was TRANSIENT — fan-out resumed, so the counter
+     *       tracks a per-tick decision rather than latching.</li>
+     * </ol>
+     */
+    @GameTest(template = "empty", batch = "p2fusefallback", timeoutTicks = 1600)
+    public void fusedSerialFallbackIsObservable(GameTestHelper helper) {
+        ServerLevel level = helper.getLevel();
+        BlockPos ground = WeftBenchGameTests.groundOrigin(helper);
+        BlockPos columnA = new BlockPos(ground.getX() - 128, 0, ground.getZ() + 128);
+        BlockPos columnB = new BlockPos(columnA.getX(), 0,
+                columnA.getZ() + ISLAND_GAP_CHUNKS * 16);
+        WeftBenchGameTests.forceChunks(level, columnA, true);
+        WeftBenchGameTests.forceChunks(level, columnB, true);
+        BlockPos baseA = surfaceBase(level, columnA);
+        BlockPos baseB = surfaceBase(level, columnB);
+
+        ActivationHooks.setActive(false);
+        PathfindingHooks.setActive(false);
+        SpawnDensityHooks.setActive(false);
+        RegionizedTicking.setActive(false);
+        LegacyRouting.setActive(false);
+
+        // [0] fused ticks and [1] fallbacks and [2] onLoad calls at the moment
+        // fan-out is known healthy; [3]/[4]/[5] same, just after the fresh BE.
+        long[] marks = new long[6];
+        String[] threadsBefore = new String[1];
+
+        helper.runAfterDelay(SETTLE_TICKS, () -> {
+            buildIsland(level, baseA);
+            buildIsland(level, baseB);
+            RegionizedTicking.setActive(true);
+            RegionizedTicking.setPartitioned(true);
+            RegionizedTicking.setMailRouting(true);
+            RegionizedTicking.setSingleJoin(true);
+            RegionizedTicking.setParallel(true);
+        });
+
+        // Let the fused path reach steady state and confirm it is fanning out
+        // BEFORE the disturbance. Without this the test could "pass" on a rig
+        // that never parallelized at all.
+        helper.runAfterDelay(SETTLE_TICKS + 40, () -> {
+            threadsBefore[0] = String.join(",",
+                    RegionizedTicking.lastEntityPartitionThreads());
+            marks[0] = RegionizedTicking.fusedTicks();
+            marks[1] = RegionizedTicking.fusedSerialFallbacks();
+            marks[2] = RegionizedTicking.fusedFreshOnLoadCalls();
+            // The disturbance: a brand new block entity inside island A.
+            // NOT furnacePos(baseA) - buildIsland already put a furnace there,
+            // so setBlock would be a same-state no-op and register no fresh
+            // block entity at all. This spot is bare platform.
+            level.setBlock(baseA.offset(6, 0, 1),
+                    Blocks.FURNACE.defaultBlockState(), Block.UPDATE_CLIENTS);
+        });
+
+        helper.runAfterDelay(SETTLE_TICKS + 48, () -> {
+            marks[3] = RegionizedTicking.fusedTicks();
+            marks[4] = RegionizedTicking.fusedSerialFallbacks();
+            marks[5] = RegionizedTicking.fusedFreshOnLoadCalls();
+        });
+
+        helper.runAfterDelay(SETTLE_TICKS + 100, () -> {
+            long ticksAfter = RegionizedTicking.fusedTicks() - marks[3];
+            long fallbacksAfter = RegionizedTicking.fusedSerialFallbacks() - marks[4];
+            long ticksDuring = marks[3] - marks[0];
+            long fallbacksDuring = marks[4] - marks[1];
+            long onLoadDuring = marks[5] - marks[2];
+            String serverThread = level.getServer().getRunningThread().getName();
+            String[] threadsEnd = RegionizedTicking.lastEntityPartitionThreads();
+            tearDown(level, baseA, baseB);
+
+            LOGGER.info("p2fusefallback: beforeThreads={} duringTicks={} duringStandDown={} "
+                    + "onLoadDuring={} afterTicks={} afterStandDown={}",
+                    threadsBefore[0], ticksDuring, fallbacksDuring, onLoadDuring,
+                    ticksAfter, fallbacksAfter);
+
+            if (threadsBefore[0] == null || threadsBefore[0].isEmpty()
+                    || threadsBefore[0].contains(serverThread)) {
+                helper.fail("Fused fan-out was not engaged BEFORE the fresh block entity ("
+                        + threadsBefore[0] + ") - with no fan-out to stand down from, a zero "
+                        + "fallback count would prove nothing");
+            }
+            if (ticksDuring <= 0) {
+                helper.fail("No fused ticks elapsed across the disturbance window - the rig "
+                        + "never exercised the fused path");
+            }
+            if (fallbacksDuring < 1) {
+                helper.fail("fusedSerialFallbacks NEVER incremented even though a fresh block "
+                        + "entity forced the fused path onto the server thread. The counter is "
+                        + "not wired to the stand-down it claims to measure, so p2fuse's "
+                        + "sustained-fan-out assertion is vacuous");
+            }
+            if (onLoadDuring != 1) {
+                helper.fail("Expected exactly 1 fused fresh-BE onLoad() call for the single "
+                        + "furnace placed, got " + onLoadDuring + ". A count of 0 means the "
+                        + "fused capture seam never fired; a count > 1 is the fixed-in-1aff76c "
+                        + "regression where PendingUnits.tick left the fresh unit undrained and "
+                        + "onLoad() re-ran every subsequent tick forever");
+            }
+            if (ticksAfter <= 0) {
+                helper.fail("Fused ticking stopped after the disturbance (" + ticksAfter + ")");
+            }
+            if (fallbacksAfter >= ticksAfter) {
+                helper.fail("Stand-down never cleared: " + fallbacksAfter + " of " + ticksAfter
+                        + " later fused ticks still stood down. A latching counter cannot "
+                        + "distinguish a transient fallback from a permanently serial run");
+            }
+            if (threadsEnd.length < 2) {
+                helper.fail("Fan-out did not resume after the fresh block entity: "
+                        + Arrays.toString(threadsEnd));
             }
             helper.succeed();
         });
