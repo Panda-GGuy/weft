@@ -20,25 +20,66 @@
   line (`p2fuse: fusedTicks=... standDown=...`) so a reviewer sees numbers.
 
 ## Open threads
-- **Batch-order dependence in `p2memoryreach`.** Adding ANY new GameTest batch
-  reshuffles batch order and makes `brainMobsNeverReachAWorker` fail with
-  "Entity section ran 1 bucket(s)". It reads `lastEntityPartition()`, a global
-  last-section probe, so it inherits whatever topology the previous batch left.
-  Proven pre-existing, not caused by the fresh-BE fix: engine fix alone = 26/26;
-  engine fix + p2fuse strengthening (no new batch) = 26/26; engine fix + new
-  batch = brainmobs fails. Fix it to force its own fan-out precondition.
-- **Blocked on the above:** the `fusedSerialFallbacks` positive control is
-  written, verified, and held back at
-  `.crew/wip/p2fusefallback-positive-control.patch` (applies clean to
-  `1aff76c`). Until it lands, `p2fuse`'s sustained-fan-out assertion subtracts
-  a counter that is always 0 in a healthy rig, so it cannot yet tell a working
-  counter from a broken one.
-- **Unexplained `p2parallel` flake (1 of 3 runs):** failed with
+- **RESOLVED 2026-08-22: `p2fuse` deterministic assertions landed.** Added
+  `lastFusedStageStartNanos`/`lastFusedStageEndNanos` (real wall-clock
+  interval capture per fused region task) and a stage-overlap assertion (>=1
+  pair of the final section's region tasks with genuinely overlapping
+  intervals - "ran on different threads" alone does not prove the
+  increment-7 "free of each other" claim; two buckets can run on different
+  threads back-to-back with zero overlap). Also added a pending-unit
+  assertion (fused BE stage's per-region `PendingUnits` containers hold >=2
+  persistent tickers in the final section) and `fusedFreshOnLoadCalls` (a
+  regression counter for the `1aff76c` bug, asserted == 1 per fresh BE
+  placement in `p2fusefallback`, not 0 and not >1). `p2fusefallback` (new
+  hard gametest, `.crew/wip/p2fusefallback-positive-control.patch` applied
+  and extended) forces the serial-fallback stand-down and confirms it is
+  transient. See commit `04335b0`.
+- **RESOLVED 2026-08-22: batch-order dependence in `p2memoryreach` was a
+  STRUCTURAL bug, not a flake.** Root cause: every villager in this test IS a
+  memory-reach entity and is THEREFORE unconditionally diverted to the
+  serial tail in `tickEntitySection`, never into a bucket. Region B,
+  containing only villagers, could therefore NEVER appear in
+  `RegionizedTicking.lastEntityPartition()` (which only reflects `buckets`)
+  no matter how correctly hazard 25 is enforced - the "both regions present
+  as distinct buckets" assertion was unsatisfiable by the rig's own
+  construction. Sampling across the whole run window (first attempt) did not
+  fix it, because the bug was not about timing/sampling. Fix: added one
+  non-Mob armour-stand decoy to region B so it has a real, always-bucketable
+  unit; the villager-deferral assertion (`unreadyUnits` floor) is unchanged
+  and unweakened. Commits `b1d87ee` (sampling, necessary but insufficient
+  alone) and `43e9595` (the actual fix). Verified: two consecutive full-suite
+  runs in a clean isolated clone (`~/weft-pr14-testrun`), 27/27 required
+  tests both times.
+- **RESOLVED 2026-08-22: `Entity is already tracked!` crash did NOT
+  reproduce in two clean full-suite runs post-fix**, including a run through
+  `p2parallelbench` (the original crash site per `#10`'s prior root cause:
+  JVM-global `Entity.ENTITY_COUNTER` rewind racing async chunk entity loads,
+  already fixed by `ParityScenario` no longer rewinding the allocator - see
+  `.crew/memory/_session/parity-issues-report.md`). This PR's fused code
+  path does not touch `ChunkMap`/`PersistentEntitySectionManager` at all
+  (confirmed by code read: no `addEntity`/`processPendingLoads` call sites
+  in `RegionizedTicking`'s fused stages). Treat any recurrence as the #10
+  class of bug (intermittent, load-dependent, pre-existing, orthogonal to
+  RFC-0007 inc7) rather than a new regression, and check whether the fix
+  landed on the branch being tested.
+- **Machine-sharing pitfall (2026-08-22):** concurrent GameTest server runs
+  against the SAME clone directory (two agent sessions, two branches, one
+  `~/weft-pr14`) corrupt each other via `world/session.lock` collisions and
+  `NoSuchFileException` on `.neoforge-tmp` save files, and can cost 400+% CPU
+  contention that skews timing-sensitive gates (`ws1entityphasereduction`
+  false-failed under contention, passed clean once isolated). When another
+  session might be running gametest in the same directory, clone a SEPARATE
+  working copy (`git clone <local-clone> <new-dir>`, checkout the same
+  branch/commit, `git remote set-url origin <real-remote>`) before running
+  `runGameTestServer`.
+- **Unexplained `p2parallel` flake (1 of 3 runs, historical):** failed with
   `entity=[2] be=[2, 16] A=2 B=16` - entity probe saw one island, BE probe saw
   both. Passed on immediate re-run, identical tree. Same single-bucket shape as
-  the brainmobs failure; may share a root cause.
-- Full GameTest suite remains red after `p2fuse` passes: optional `parallelregionsentitysection` crashes in `ChunkMap.addEntity` with `Entity is already tracked!` during pending-load processing. Not caused inside fused task stack; needs separate test-isolation/tracker audit.
-- Selective batch invocation is not exposed by current Gradle run config. Final full-suite rerun after hardening reached the same earlier optional tracker crash before suite completion; full build is green.
+  the pre-fix brainmobs failure; may share the same root-cause family
+  (villager/memory-reach entities being the only occupants of a region in a
+  given section). Watch for recurrence; the `p2memoryreach` fix does not
+  necessarily cover this test's own rig.
+- Selective batch invocation is not exposed by current Gradle run config.
 
 ## Lessons
 - 2026-08-21: **`PendingUnits.tick` is the wrong verb for one-shot work.** The

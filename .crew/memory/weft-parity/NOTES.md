@@ -111,3 +111,51 @@
 ## Next
 - Q1/Q2: after increment-7 7c lands, add `p2fuse`; then build `p2navdefer` and
   `p2evictionchurn` so #3/#6 can close honestly without lead intervention.
+
+## 2026-08-22 — PR #14 unblocked: p2fuse deterministic assertions + full suite green x2
+
+- Added to `p2fuse`: a real wall-clock STAGE-OVERLAP assertion (region tasks'
+  mail-drain-start to BE-stage-end intervals, index-aligned with
+  `lastEntityPartition()`, exposed via new `lastFusedStageStartNanos()` /
+  `lastFusedStageEndNanos()`) — proves at least one pair of the final
+  section's region tasks genuinely overlapped in time, not just "ran on
+  different threads" (two buckets can be handed to the pool sequentially with
+  no free worker and never overlap while still passing every prior
+  assertion). Also a PENDING-UNIT assertion (`lastBlockEntityUnits() >= 2`)
+  proving the fused BE stage's per-region `PendingUnits` containers are the
+  live path carrying real persistent tickers, not dead code that happens to
+  compile.
+- New hard gametest `p2fusefallback`: forces the fused path's serial
+  fallback (place a fresh block entity mid-run under sustained fan-out) and
+  asserts fan-out was engaged before, `fusedSerialFallbacks` moved during,
+  the new `fusedFreshOnLoadCalls` counter moved by EXACTLY 1 (not 0 = seam
+  never fired, not >1 = the `1aff76c` regression where `onLoad()` re-fires
+  every tick forever), and fan-out resumed after (transient, not latching).
+  This extends and applies the previously-held-back
+  `.crew/wip/p2fusefallback-positive-control.patch`.
+- Found and fixed a REAL, non-vacuous bug in `p2memoryreach`
+  (`brainMobsNeverReachAWorker`), not just the previously-suspected
+  batch-order flake: every villager in that test is memory-reach and is
+  THEREFORE unconditionally diverted to the serial tail in
+  `tickEntitySection`, never into a bucket. Region B (villagers only) could
+  therefore NEVER appear in `lastEntityPartition()` no matter how correctly
+  hazard 25 is enforced — the "both regions present as distinct buckets"
+  assertion was unsatisfiable by the rig's own construction. Fixed by adding
+  one non-Mob armour-stand decoy to region B (a guaranteed-bucketable unit)
+  and sampling fan-out across the whole run window instead of one end
+  snapshot (defends against the real, separate batch-order/global-probe
+  contamination issue too). Villager deferral assertion unchanged/unweakened.
+- Full build green (`./gradlew build -PwithNeoForge`).
+  `./gradlew :weft-neoforge:runGameTestServer -PwithNeoForge` run TWICE
+  back-to-back: both 27/27 required tests green, `p2fuse` non-vacuous
+  (fusedTicks=211, fannedOut=211, standDown=0), `p2fusefallback` non-vacuous
+  (fallback engaged mid-run, onLoad=1, resumed after), `p2memoryreach` green.
+  The historically-flaky `blockentityshardingbelowthreshold` (optional,
+  non-required) failed both runs — pre-existing timing-margin bench, not
+  touched by this work, does not gate the build.
+  The previously-reported `parallelregionsentitysection` "Entity is already
+  tracked!" tracker crash and `ws1entityphasereduction` timing-margin miss
+  did NOT reproduce in either of these two runs — consistent with prior notes
+  describing both as intermittent/timing-sensitive, not structural.
+- PR #14 (`crew/neoforge-inc7`) pushed with these fixes. `singleJoinTick`
+  stays default OFF; no shipping-posture change.
