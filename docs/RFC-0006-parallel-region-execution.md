@@ -358,10 +358,19 @@ mixins are active regardless of the flag (identical single-threaded
 semantics, uncontended-lock cost only); the worker chunk path, deferral, and
 fan-out engage only with the flag. **§3.1's candidate hazards 19 and 20 are
 exit criteria for default-ON (signed off 2026-08-18)**: `parallelRegions`
-does not flip default-ON with either still open. Exit criteria to default-ON
-remain: the
+does not flip default-ON with either still open. **Hazard 20 is now closed**
+(CONFIRMED 2026-08-20 via issue #16, closed by the R7-matrix posture route —
+Moonrise co-enabling stays unsupported rather than merely untested; see §3.1's
+own row for the caveat that the *first* route, a worker read path proven safe
+against Moonrise's chunk system, remains unbuilt). **Hazard 19 (the light
+engine) is still open** — an audit gap, not a finding, per §3.1. Exit criteria
+to default-ON remain: hazard 19 closed, the
 full parity suite green at declared classes, chaos + R7 green, and the
-Create/AE2 soak clean under the flag.
+Create/AE2 soak clean under the flag. Also currently open and unresolved:
+RFC-0006 hazard 24 (issue #6, worker block-entity tick reading an absent
+neighbour chunk) — the underlying fix has shipped, but its regression gate
+(`p2evictionchurn`) is still blocked (PR #29, draft) and #6 is the repo's sole
+open issue as of this writing.
 
 **Amended 2026-08-18 — hazard 22 found, then fixed; opt-in restored.** For a
 few hours this section read "experimental, throwaway worlds only": the first

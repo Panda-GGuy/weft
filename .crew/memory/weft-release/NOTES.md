@@ -29,3 +29,16 @@
   bounded docs increment when they describe the same checkpoint; verify flag
   names against `WeftConfig`, commit/push evidence first, then land a separate
   ignored `_session` commit report so reported SHA and push result are exact.
+- 2026-08-22: status-hygiene pass (crew/release-hygiene-2026-08-22). RFC docs
+  can go stale even when they name the correct issue number: RFC-0006 §5's
+  rollout paragraph cited hazard 20 as still-open in its "does not flip
+  default-ON" sentence, one paragraph below the hazard table's own
+  CONFIRMED/closed note for the same hazard — the summary sentence just never
+  got updated when the row above it changed. Lesson: when a hazard/issue
+  status changes, grep the whole RFC for every other place that hazard number
+  appears, not just its table row. Also: `gh issue list --state all` +
+  `gh pr view <n>` for the draft PRs referencing the current open issue (#6)
+  is the fastest way to confirm which flag fixes have "shipped" vs whose
+  *regression gate* is still blocked — these are different claims and RFCs
+  sometimes conflate "fix implemented" with "verified/gated," which matters
+  for honest status text.
