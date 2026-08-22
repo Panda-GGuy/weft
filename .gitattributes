@@ -1,3 +1,6 @@
 # CI shell/python harnesses must stay LF even on Windows checkouts.
 *.sh text eol=lf
 *.py text eol=lf
+# Stored patches must keep the exact bytes `git apply` was verified against;
+# a CRLF round-trip on checkout can make a good patch stop applying.
+*.patch -text

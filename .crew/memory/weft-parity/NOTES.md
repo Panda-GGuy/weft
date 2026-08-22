@@ -1,5 +1,43 @@
 ﻿# weft-parity memory
 
+## Update — 2026-08-22: PR #14 deterministic p2fuse gate landed, suite green x2
+- Addressed the 2026-08-20 recovery checkpoint's BLOCK reasons for PR #14
+  (head `432f831` -> `43e9595` on `crew/neoforge-inc7`):
+  - `p2fuse` now has a real cross-region **stage-overlap** assertion (new
+    `RegionizedTicking.lastFusedStageStartNanos/EndNanos`, wall-clock interval
+    capture per fused region task; asserts >=1 genuinely overlapping pair,
+    not just distinct thread names).
+  - `p2fuse` now has a **pending-unit** assertion (fused BE stage's per-region
+    `PendingUnits` containers hold >=2 persistent tickers in the final
+    section - proves RFC-0007 sec 4 item 1's containers are the live path).
+  - New `p2fusefallback` hard gametest is the **forced entity/BE fallback**
+    assertion: places a fresh block entity under sustained fan-out, asserts
+    `fusedSerialFallbacks` moves, `fusedFreshOnLoadCalls` (new regression
+    counter for the `1aff76c` bug) moves by exactly 1, and fan-out resumes
+    (transient, not latching).
+  - `Entity is already tracked!` did NOT reproduce across two clean full-suite
+    runs (isolated clone, see weft-neoforge NOTES.md for the isolation
+    methodology and root-cause history from issue #10). Fused code path
+    (read, confirmed) makes zero calls into `ChunkMap`/
+    `PersistentEntitySectionManager`; any recurrence is issue #10's known
+    intermittent class, not a regression from this PR.
+  - Along the way found and fixed a STRUCTURAL (not flaky) bug in the
+    pre-existing `p2memoryreach` gate: it asserted an outcome
+    (villager-only region appears as a distinct bucket) that was
+    unsatisfiable by its own rig's construction, since every villager there
+    is unconditionally deferred to the serial tail. Fixed with a decoy
+    always-bucketable entity; the actual hazard-25 assertion is unchanged.
+- **Full suite verified GREEN twice in a row**: 27/27 required tests, two
+  separate `runGameTestServer` invocations in a clean isolated clone
+  (`~/weft-pr14-testrun`, checked out to `crew/neoforge-inc7` @ `43e9595`).
+  `singleJoinTick` stayed default OFF throughout (test-only flag flips via
+  `RegionizedTicking.setSingleJoin`, never touched in shipped config).
+- Still true from the 2026-08-20 checkpoint and NOT addressed by this pass:
+  issues #3 (`p2navdefer` status unverified this session), #6
+  (`p2evictionchurn` still doesn't exist), #16 (Moonrise/parallel posture
+  field data still not fan-out proof). This pass was scoped to PR #14's own
+  "still blocking review/merge" list only.
+
 ## Recovery checkpoint — 2026-08-20
 - PR #14 parity review is BLOCK at head `432f831`: fused hazard-24 readiness
   failure counts `unreadyUnits` but still runs BE ticker on worker; fused entity
@@ -18,6 +56,7 @@
 - Full gametest suite (`./gradlew :weft-neoforge:runGameTestServer -PwithNeoForge`)
   is the load-bearing hard gate: 24/24 required tests. After #10 harness fix,
   two consecutive runs passed at `crew/parity-close` (2026-08-19/20).
+
 - Engine unit tests (`./gradlew :weft-engine:test`): 118 tests, 0 failures.
 - Both re-run clean 2026-08-19 as part of hazard 21-25 verification.
 
@@ -111,3 +150,51 @@
 ## Next
 - Q1/Q2: after increment-7 7c lands, add `p2fuse`; then build `p2navdefer` and
   `p2evictionchurn` so #3/#6 can close honestly without lead intervention.
+
+## 2026-08-22 — PR #14 unblocked: p2fuse deterministic assertions + full suite green x2
+
+- Added to `p2fuse`: a real wall-clock STAGE-OVERLAP assertion (region tasks'
+  mail-drain-start to BE-stage-end intervals, index-aligned with
+  `lastEntityPartition()`, exposed via new `lastFusedStageStartNanos()` /
+  `lastFusedStageEndNanos()`) — proves at least one pair of the final
+  section's region tasks genuinely overlapped in time, not just "ran on
+  different threads" (two buckets can be handed to the pool sequentially with
+  no free worker and never overlap while still passing every prior
+  assertion). Also a PENDING-UNIT assertion (`lastBlockEntityUnits() >= 2`)
+  proving the fused BE stage's per-region `PendingUnits` containers are the
+  live path carrying real persistent tickers, not dead code that happens to
+  compile.
+- New hard gametest `p2fusefallback`: forces the fused path's serial
+  fallback (place a fresh block entity mid-run under sustained fan-out) and
+  asserts fan-out was engaged before, `fusedSerialFallbacks` moved during,
+  the new `fusedFreshOnLoadCalls` counter moved by EXACTLY 1 (not 0 = seam
+  never fired, not >1 = the `1aff76c` regression where `onLoad()` re-fires
+  every tick forever), and fan-out resumed after (transient, not latching).
+  This extends and applies the previously-held-back
+  `.crew/wip/p2fusefallback-positive-control.patch`.
+- Found and fixed a REAL, non-vacuous bug in `p2memoryreach`
+  (`brainMobsNeverReachAWorker`), not just the previously-suspected
+  batch-order flake: every villager in that test is memory-reach and is
+  THEREFORE unconditionally diverted to the serial tail in
+  `tickEntitySection`, never into a bucket. Region B (villagers only) could
+  therefore NEVER appear in `lastEntityPartition()` no matter how correctly
+  hazard 25 is enforced — the "both regions present as distinct buckets"
+  assertion was unsatisfiable by the rig's own construction. Fixed by adding
+  one non-Mob armour-stand decoy to region B (a guaranteed-bucketable unit)
+  and sampling fan-out across the whole run window instead of one end
+  snapshot (defends against the real, separate batch-order/global-probe
+  contamination issue too). Villager deferral assertion unchanged/unweakened.
+- Full build green (`./gradlew build -PwithNeoForge`).
+  `./gradlew :weft-neoforge:runGameTestServer -PwithNeoForge` run TWICE
+  back-to-back: both 27/27 required tests green, `p2fuse` non-vacuous
+  (fusedTicks=211, fannedOut=211, standDown=0), `p2fusefallback` non-vacuous
+  (fallback engaged mid-run, onLoad=1, resumed after), `p2memoryreach` green.
+  The historically-flaky `blockentityshardingbelowthreshold` (optional,
+  non-required) failed both runs — pre-existing timing-margin bench, not
+  touched by this work, does not gate the build.
+  The previously-reported `parallelregionsentitysection` "Entity is already
+  tracked!" tracker crash and `ws1entityphasereduction` timing-margin miss
+  did NOT reproduce in either of these two runs — consistent with prior notes
+  describing both as intermittent/timing-sensitive, not structural.
+- PR #14 (`crew/neoforge-inc7`) pushed with these fixes. `singleJoinTick`
+  stays default OFF; no shipping-posture change.

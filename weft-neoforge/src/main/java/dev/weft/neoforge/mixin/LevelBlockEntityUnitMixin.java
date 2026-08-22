@@ -42,6 +42,9 @@ public abstract class LevelBlockEntityUnitMixin implements LegacyLaneBlockEntity
                     target = "Lnet/minecraft/world/level/block/entity/TickingBlockEntity;tick()V"))
     private void weft$blockEntityUnit(TickingBlockEntity ticker, Operation<Void> original) {
         if ((Object) this instanceof ServerLevel serverLevel) {
+            if (RegionizedTicking.captureFusedExistingTicker(serverLevel, ticker, ticker::tick)) {
+                return;
+            }
             if (!RegionizedTicking.captureBlockEntityUnit(serverLevel, ticker,
                     () -> LegacyRouting.tickBlockEntityOrDefer(serverLevel, ticker, ticker::tick))) {
                 LegacyRouting.tickBlockEntityOrDefer(serverLevel, ticker,

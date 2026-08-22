@@ -15,6 +15,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.ai.navigation.PathNavigation;
+import net.minecraft.world.entity.decoration.ArmorStand;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.levelgen.Heightmap;
@@ -82,12 +83,45 @@ public class MemoryReachEntityGameTests {
 
         List<Mob> mobs = new ArrayList<>();
         long[] baseline = new long[2];
+        // Non-Brain decoy in region B (an armour stand is not even a Mob, so
+        // it never enters `mobs`/hazard-25 classification at all). Structural
+        // fix: EVERY villager in this test IS a memory-reach entity and is
+        // THEREFORE ALWAYS diverted to the serial tail, never into a bucket
+        // (see tickEntitySection's `gateReads && isMemoryReach` branch, which
+        // sends 100% of memory-reach entities straight to `tail`, never
+        // `buckets`). That means region B, containing only villagers, can
+        // NEVER appear in RegionizedTicking.lastEntityPartition() (which only
+        // reflects `buckets`) no matter how correctly hazard 25 is enforced -
+        // the "both regions present as distinct buckets" assertion was
+        // unsatisfiable by the test's own construction, not flaky. Region B
+        // needs one entity that is guaranteed to bucket for the assertion to
+        // be checking anything real.
+        ArmorStand decoy = EntityType.ARMOR_STAND.create(level);
+        if (decoy == null) {
+            throw new IllegalStateException("decoy armor stand failed to create");
+        }
+        // Sustained fan-out, sampled every tick of the run rather than only at
+        // the check point. lastEntityPartition() is a global, level-wide
+        // last-SECTION probe shared with every other GameTest batch/instance
+        // ticking concurrently on the same level - which tests are running at
+        // any given tick shifts with batch scheduling, so a single end-of-run
+        // snapshot can be contaminated or empty independent of this rig's own
+        // behaviour (the recorded "adding a new batch reshuffles order" flake).
+        // Sampling across the whole window and requiring the specific region
+        // ids this rig itself created makes the assertion about what THIS
+        // test's own islands did.
+        boolean[] sawTwoBucketsWithBothRegions = new boolean[1];
 
         helper.runAfterDelay(1, () -> {
             // Zombies in region A: goal-based AI, no position memories, must bucket.
             spawn(level, baseA, EntityType.ZOMBIE, ZOMBIES, mobs);
             // Villagers in region B: Brain with HOME/JOB_SITE, must NOT bucket.
             spawn(level, baseB, EntityType.VILLAGER, VILLAGERS, mobs);
+            // The decoy: region B's only entity that is allowed into a bucket.
+            decoy.moveTo(baseB.getX() + 4.5, baseB.getY() + 1, baseB.getZ() + 4.5, 0.0f, 0.0f);
+            if (!level.addFreshEntity(decoy)) {
+                throw new IllegalStateException("level rejected decoy armor stand");
+            }
             baseline[0] = RegionizedTicking.unreadyUnits();
             baseline[1] = RegionizedTicking.unmappedUnits();
             RegionizedTicking.setActive(true);
@@ -95,23 +129,37 @@ public class MemoryReachEntityGameTests {
             RegionizedTicking.setParallel(true);
         });
 
+        for (int tick = SETTLE_TICKS; tick < SETTLE_TICKS + RUN_TICKS; tick++) {
+            helper.runAfterDelay(tick, () -> {
+                long regionA = regionIdAt(level, baseA);
+                long regionB = regionIdAt(level, baseB);
+                long[] partition = RegionizedTicking.lastEntityPartition();
+                if (regionA >= 0 && regionB >= 0 && regionA != regionB
+                        && partition.length >= 2
+                        && contains(partition, regionA) && contains(partition, regionB)) {
+                    sawTwoBucketsWithBothRegions[0] = true;
+                }
+            });
+        }
+
         helper.runAfterDelay(SETTLE_TICKS + RUN_TICKS, () -> {
             long deferred = RegionizedTicking.unreadyUnits() - baseline[0];
             long unmapped = RegionizedTicking.unmappedUnits() - baseline[1];
-            long[] partition = RegionizedTicking.lastEntityPartition();
             long regionA = regionIdAt(level, baseA);
             long regionB = regionIdAt(level, baseB);
             int alive = (int) mobs.stream().filter(m -> !m.isRemoved()).count();
             tearDown(level, columnA, columnB, mobs);
+            decoy.discard();
 
             if (regionA == regionB || regionA < 0 || regionB < 0) {
                 helper.fail("Islands did not resolve to two regions (A=" + regionA + " B="
                         + regionB + ") - the section would not fan out, so this proves nothing");
                 return;
             }
-            if (partition.length < 2) {
-                helper.fail("Entity section ran " + partition.length + " bucket(s); with mobs in "
-                        + "both islands it must fan out or the gate is untested");
+            if (!sawTwoBucketsWithBothRegions[0]) {
+                helper.fail("Entity section never ran both island regions as distinct buckets "
+                        + "across the run window; with mobs in both islands it must fan out or "
+                        + "the gate is untested");
                 return;
             }
             if (alive < mobs.size()) {
@@ -258,6 +306,15 @@ public class MemoryReachEntityGameTests {
     private static long regionIdAt(ServerLevel level, BlockPos pos) {
         var region = RegionTopology.managerFor(level).regionAtBlock(pos.getX(), pos.getZ());
         return region == null ? -1L : region.id();
+    }
+
+    private static boolean contains(long[] ids, long id) {
+        for (long candidate : ids) {
+            if (candidate == id) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static void tearDown(ServerLevel level, BlockPos columnA, BlockPos columnB,
