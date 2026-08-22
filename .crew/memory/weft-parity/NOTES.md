@@ -1,5 +1,43 @@
 ﻿# weft-parity memory
 
+## Update — 2026-08-22: PR #14 deterministic p2fuse gate landed, suite green x2
+- Addressed the 2026-08-20 recovery checkpoint's BLOCK reasons for PR #14
+  (head `432f831` -> `43e9595` on `crew/neoforge-inc7`):
+  - `p2fuse` now has a real cross-region **stage-overlap** assertion (new
+    `RegionizedTicking.lastFusedStageStartNanos/EndNanos`, wall-clock interval
+    capture per fused region task; asserts >=1 genuinely overlapping pair,
+    not just distinct thread names).
+  - `p2fuse` now has a **pending-unit** assertion (fused BE stage's per-region
+    `PendingUnits` containers hold >=2 persistent tickers in the final
+    section - proves RFC-0007 sec 4 item 1's containers are the live path).
+  - New `p2fusefallback` hard gametest is the **forced entity/BE fallback**
+    assertion: places a fresh block entity under sustained fan-out, asserts
+    `fusedSerialFallbacks` moves, `fusedFreshOnLoadCalls` (new regression
+    counter for the `1aff76c` bug) moves by exactly 1, and fan-out resumes
+    (transient, not latching).
+  - `Entity is already tracked!` did NOT reproduce across two clean full-suite
+    runs (isolated clone, see weft-neoforge NOTES.md for the isolation
+    methodology and root-cause history from issue #10). Fused code path
+    (read, confirmed) makes zero calls into `ChunkMap`/
+    `PersistentEntitySectionManager`; any recurrence is issue #10's known
+    intermittent class, not a regression from this PR.
+  - Along the way found and fixed a STRUCTURAL (not flaky) bug in the
+    pre-existing `p2memoryreach` gate: it asserted an outcome
+    (villager-only region appears as a distinct bucket) that was
+    unsatisfiable by its own rig's construction, since every villager there
+    is unconditionally deferred to the serial tail. Fixed with a decoy
+    always-bucketable entity; the actual hazard-25 assertion is unchanged.
+- **Full suite verified GREEN twice in a row**: 27/27 required tests, two
+  separate `runGameTestServer` invocations in a clean isolated clone
+  (`~/weft-pr14-testrun`, checked out to `crew/neoforge-inc7` @ `43e9595`).
+  `singleJoinTick` stayed default OFF throughout (test-only flag flips via
+  `RegionizedTicking.setSingleJoin`, never touched in shipped config).
+- Still true from the 2026-08-20 checkpoint and NOT addressed by this pass:
+  issues #3 (`p2navdefer` status unverified this session), #6
+  (`p2evictionchurn` still doesn't exist), #16 (Moonrise/parallel posture
+  field data still not fan-out proof). This pass was scoped to PR #14's own
+  "still blocking review/merge" list only.
+
 ## Recovery checkpoint — 2026-08-20
 - PR #14 parity review is BLOCK at head `432f831`: fused hazard-24 readiness
   failure counts `unreadyUnits` but still runs BE ticker on worker; fused entity
@@ -18,6 +56,7 @@
 - Full gametest suite (`./gradlew :weft-neoforge:runGameTestServer -PwithNeoForge`)
   is the load-bearing hard gate: 24/24 required tests. After #10 harness fix,
   two consecutive runs passed at `crew/parity-close` (2026-08-19/20).
+
 - Engine unit tests (`./gradlew :weft-engine:test`): 118 tests, 0 failures.
 - Both re-run clean 2026-08-19 as part of hazard 21-25 verification.
 
