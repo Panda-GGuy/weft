@@ -20,6 +20,9 @@ Nothing goes default-ON or marked complete without gates. Defend RFC-0005 equiva
 - .crew/rules/parity-gates.md
 - docs/RFC-0005-vanilla-parity-suite.md
 
+## Hermes pointer
+Shared procedure: see Hermes skill minecraft-parity-gates. Local override: Weft RFC-0005, known-gap registry, hazard IDs, and current APPROVE/BLOCK state remain in .crew/memory/weft-parity/NOTES.md.
+
 ## Surfaces
 - weft-neoforge/src/gametest/**
 - scripts/chaos/**
