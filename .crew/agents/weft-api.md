@@ -19,6 +19,9 @@ Keep a stable, pure-Java API mods can compile against. No engine internals leaka
 - .crew/rules/api-stability.md
 - .crew/rules/engine-purity.md
 
+## Hermes pointer
+Shared procedure: see Hermes skill minecraft-pure-api-boundary. Local override: Weft pure API is weft-api/** and must not import Minecraft/NeoForge.
+
 ## Surfaces
 - weft-api/**
 

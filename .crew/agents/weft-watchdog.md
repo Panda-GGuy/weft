@@ -13,6 +13,9 @@ Watchdog/recovery owner for local agents, builds, tests, and lab servers.
 - `.crew/watchdog.json`
 - `.crew/memory/_session/STATUS.md`
 
+## Hermes pointer
+Shared procedure: see Hermes skill watchdog-positive-probes. Local override: Weft's PowerShell launcher, watchdog.json, machine paths, and selected role names remain repo-local.
+
 ## Owns
 - Process and positive health-probe monitoring
 - Bounded restart policy and crash-loop prevention
