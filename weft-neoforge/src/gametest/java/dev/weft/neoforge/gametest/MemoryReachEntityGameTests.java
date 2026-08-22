@@ -15,6 +15,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.ai.navigation.PathNavigation;
+import net.minecraft.world.entity.decoration.ArmorStand;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.levelgen.Heightmap;
@@ -82,16 +83,33 @@ public class MemoryReachEntityGameTests {
 
         List<Mob> mobs = new ArrayList<>();
         long[] baseline = new long[2];
+        // Non-Brain decoy in region B (an armour stand is not even a Mob, so
+        // it never enters `mobs`/hazard-25 classification at all). Structural
+        // fix: EVERY villager in this test IS a memory-reach entity and is
+        // THEREFORE ALWAYS diverted to the serial tail, never into a bucket
+        // (see tickEntitySection's `gateReads && isMemoryReach` branch, which
+        // sends 100% of memory-reach entities straight to `tail`, never
+        // `buckets`). That means region B, containing only villagers, can
+        // NEVER appear in RegionizedTicking.lastEntityPartition() (which only
+        // reflects `buckets`) no matter how correctly hazard 25 is enforced -
+        // the "both regions present as distinct buckets" assertion was
+        // unsatisfiable by the test's own construction, not flaky. Region B
+        // needs one entity that is guaranteed to bucket for the assertion to
+        // be checking anything real.
+        ArmorStand decoy = EntityType.ARMOR_STAND.create(level);
+        if (decoy == null) {
+            throw new IllegalStateException("decoy armor stand failed to create");
+        }
         // Sustained fan-out, sampled every tick of the run rather than only at
-        // the check point. lastEntityPartition() is a global last-SECTION
-        // probe: it can legitimately read one bucket for a single tick (e.g. a
-        // topology recheck straddling a chunk-load boundary) while every other
-        // tick in the window fanned out fine. A gate reading only the final
-        // snapshot inherits whatever transient state that one tick happened to
-        // leave, which is exactly the batch-order flake this file's own memory
-        // notes record (adding a new GameTest batch reshuffles run order and
-        // reveals it). Sampling across the whole window makes the assertion
-        // about what this test's own rig actually did, not about one instant.
+        // the check point. lastEntityPartition() is a global, level-wide
+        // last-SECTION probe shared with every other GameTest batch/instance
+        // ticking concurrently on the same level - which tests are running at
+        // any given tick shifts with batch scheduling, so a single end-of-run
+        // snapshot can be contaminated or empty independent of this rig's own
+        // behaviour (the recorded "adding a new batch reshuffles order" flake).
+        // Sampling across the whole window and requiring the specific region
+        // ids this rig itself created makes the assertion about what THIS
+        // test's own islands did.
         boolean[] sawTwoBucketsWithBothRegions = new boolean[1];
 
         helper.runAfterDelay(1, () -> {
@@ -99,6 +117,11 @@ public class MemoryReachEntityGameTests {
             spawn(level, baseA, EntityType.ZOMBIE, ZOMBIES, mobs);
             // Villagers in region B: Brain with HOME/JOB_SITE, must NOT bucket.
             spawn(level, baseB, EntityType.VILLAGER, VILLAGERS, mobs);
+            // The decoy: region B's only entity that is allowed into a bucket.
+            decoy.moveTo(baseB.getX() + 4.5, baseB.getY() + 1, baseB.getZ() + 4.5, 0.0f, 0.0f);
+            if (!level.addFreshEntity(decoy)) {
+                throw new IllegalStateException("level rejected decoy armor stand");
+            }
             baseline[0] = RegionizedTicking.unreadyUnits();
             baseline[1] = RegionizedTicking.unmappedUnits();
             RegionizedTicking.setActive(true);
@@ -126,6 +149,7 @@ public class MemoryReachEntityGameTests {
             long regionB = regionIdAt(level, baseB);
             int alive = (int) mobs.stream().filter(m -> !m.isRemoved()).count();
             tearDown(level, columnA, columnB, mobs);
+            decoy.discard();
 
             if (regionA == regionB || regionA < 0 || regionB < 0) {
                 helper.fail("Islands did not resolve to two regions (A=" + regionA + " B="
