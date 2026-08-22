@@ -1,6 +1,11 @@
 # RFC-0007: Free-running regions — owner-mail rerouting and the single-join tick
 
-Status: DRAFT (increment 6 in progress) · 2026-08-17
+Status: DRAFT — increment 6 (owner-mail rerouting, `ownerMailRouting`) is
+implemented and gated (`p2mail`, `OwnerMailGameTests`), merged to main behind
+its default-OFF flag; increment 7 (the single-join tick, `singleJoinTick`) is
+scaffolding only — the fused-task runner exists and is unit-tested, but the
+loader tick path does not route through it yet (PR #14, still draft and
+review-blocked) · 2026-08-17
 Depends on: RFC-0001 §4 (threading model, §4.3 pipeline), §8.2 (mailboxes),
 RFC-0005 (parity ladder), RFC-0006 (barriered parallel regions), P2 increments 1–5
 

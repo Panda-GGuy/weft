@@ -266,7 +266,12 @@ applying at INGEST (with the main thread parked, global-inbox delivery *is*
 owner delivery). Owner-mail routing and block-entity sharding have since
 landed behind default-OFF flags and their contract gates (RFC-0007 §3 and
 RFC-0008); the single-join region tick and long-tail soak (Create/AE2, chaos,
-R7 under the flags) still stand between this stack and default-ON.
+R7 under the flags) still stand between this stack and default-ON. **Current
+known blocker: RFC-0006 hazard 24 / issue #6** — a worker block-entity tick
+can read an absent neighbour chunk on teleport; the fix has shipped
+(`RegionizedTicking.readNeighbourhoodLive`) but its automated regression gate
+(`p2evictionchurn`) does not yet pass (draft PR #29) — this is the repo's sole
+open issue as of this writing.
 
 **RFC-0002/0003 workstreams started** (2026-08-16): every Weft optimization
 module now walks the [RFC-0003](docs/RFC-0003-coexistence-policy.md)
