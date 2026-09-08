@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1788770153969,
+  "lastUpdate": 1788855658662,
   "repoUrl": "https://github.com/Panda-GGuy/weft",
   "entries": {
     "Weft world bench": [
@@ -4084,6 +4084,226 @@ window.BENCHMARK_DATA = {
             "value": 26.944,
             "unit": "ms/tick",
             "extra": "-0.9% full-tick MSPT reduction with P1 services at shipping defaults (spawn-density AUTHORITATIVE incl. verify ticks, asyncPathfinding=true); p95 32.663 ms; 15/300 ticks served async"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Panda-GGuy",
+            "username": "Panda-GGuy",
+            "email": "218838703+Panda-GGuy@users.noreply.github.com"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "7270a365a10139456987b7158c500f0a974fee7e",
+          "message": "Merge pull request #28 from Panda-GGuy/crew/lead-state-h24\n\ndocs(crew): record the abandoned-gate and rebase-conflict lessons",
+          "timestamp": "2026-08-21T06:24:15Z",
+          "url": "https://github.com/Panda-GGuy/weft/commit/7270a365a10139456987b7158c500f0a974fee7e"
+        },
+        "date": 1788855657637,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "ws1_entity_phase_vanilla_ai",
+            "value": 34.1794,
+            "unit": "ms/tick",
+            "extra": "activation scheduling OFF (baseline)"
+          },
+          {
+            "name": "ws1_entity_phase_ai_slice_vanilla",
+            "value": 5.4156,
+            "unit": "ms/tick",
+            "extra": "AI step (serverAiStep) = 15.8% of the vanilla entity phase; the pool WS-1 gating can address"
+          },
+          {
+            "name": "ws1_entity_phase_ai_slice_activated",
+            "value": 1.1997,
+            "unit": "ms/tick",
+            "extra": "AI step remaining with activation scheduling ON (4.4% of its entity phase)"
+          },
+          {
+            "name": "ws1_entity_phase_activation_scheduling",
+            "value": 27.1489,
+            "unit": "ms/tick",
+            "extra": "20.6% entity-phase reduction (parity-tier floor: >=10%); 2000 passive + 500 hostile mobs, 300 measured ticks/phase; 655408 AI skips, 0 repaths deferred (WS-2 requests avoided)"
+          },
+          {
+            "name": "ws1_ai_slice_reduction",
+            "value": 77.8476,
+            "unit": "%",
+            "extra": "parity-tier acceptance bar: >=50% of the AI-step slice removed (5.416 -> 1.200 ms/tick). This is the pool AI-frequency gating can address; the >=30% entity-phase bar belongs to the opt-in aggressive tier (RFC-0002 WS-1)"
+          },
+          {
+            "name": "ws2_entity_phase_sync_pathfinding",
+            "value": 33.1308,
+            "unit": "ms/tick",
+            "extra": "async pathfinding OFF (baseline)"
+          },
+          {
+            "name": "ws2_entity_phase_async_pathfinding",
+            "value": 32.7663,
+            "unit": "ms/tick",
+            "extra": "1.1% entity-phase reduction; 3983 requests routed off-thread; 2000 passive + 500 hostile mobs, 300 measured ticks/phase"
+          },
+          {
+            "name": "ws7_exporter_overhead_mspt_off",
+            "value": 13.6435,
+            "unit": "ms/tick",
+            "extra": "OFF median 13.643 ms (p95 16.303, n=388); ON@10s median 14.033 ms (p95 18.827, n=388, 2 scrapes) = +2.85%; CONTROL ON@every-tick median 14.209 ms (p95 22.743, n=388, 78 scrapes) = +4.14%. 6 interleaved phases (OFF / ON@200t / ON@1t, twice), 200 ticks each, 5 skipped per phase, region timing on, 1200 passive mobs + 1 bot"
+          },
+          {
+            "name": "ws7_exporter_overhead_mspt_on",
+            "value": 14.0326,
+            "unit": "ms/tick",
+            "extra": "OFF median 13.643 ms (p95 16.303, n=388); ON@10s median 14.033 ms (p95 18.827, n=388, 2 scrapes) = +2.85%; CONTROL ON@every-tick median 14.209 ms (p95 22.743, n=388, 78 scrapes) = +4.14%. 6 interleaved phases (OFF / ON@200t / ON@1t, twice), 200 ticks each, 5 skipped per phase, region timing on, 1200 passive mobs + 1 bot"
+          },
+          {
+            "name": "ws7_exporter_overhead_pct",
+            "value": 2.8524,
+            "unit": "percent",
+            "extra": "RFC-0002 WS-7 acceptance: overhead unmeasurable at 10s scrape interval. OFF median 13.643 ms (p95 16.303, n=388); ON@10s median 14.033 ms (p95 18.827, n=388, 2 scrapes) = +2.85%; CONTROL ON@every-tick median 14.209 ms (p95 22.743, n=388, 78 scrapes) = +4.14%. 6 interleaved phases (OFF / ON@200t / ON@1t, twice), 200 ticks each, 5 skipped per phase, region timing on, 1200 passive mobs + 1 bot"
+          },
+          {
+            "name": "ws7_exporter_control_overhead_pct",
+            "value": 4.1444,
+            "unit": "percent",
+            "extra": "Negative control: same exporter scraped 200x more often. If this is resolvable and the 10s figure is not, 'unmeasurable at 10s' is a supported claim rather than an absence of evidence. OFF median 13.643 ms (p95 16.303, n=388); ON@10s median 14.033 ms (p95 18.827, n=388, 2 scrapes) = +2.85%; CONTROL ON@every-tick median 14.209 ms (p95 22.743, n=388, 78 scrapes) = +4.14%. 6 interleaved phases (OFF / ON@200t / ON@1t, twice), 200 ticks each, 5 skipped per phase, region timing on, 1200 passive mobs + 1 bot"
+          },
+          {
+            "name": "p2_be_sharding_control_section_serial",
+            "value": 0.254,
+            "unit": "ms/tick",
+            "extra": "median block-entity-section wall time, blockEntitySharding OFF; p95 1.342 ms; ONE region, 1600 ticking block entities across 400 chunks, 4 colour passes; 442+442 measured ticks (8 skipped/phase, 6 phases interleaved)"
+          },
+          {
+            "name": "p2_be_sharding_control_section_sharded",
+            "value": 0.2502,
+            "unit": "ms/tick",
+            "extra": "median block-entity-section wall time, blockEntitySharding ON; p95 1.192 ms; 1.02x vs serial (p95 1.13x); 0 shard passes over 0 units, max 0 concurrent chunks; ONE region, 1600 ticking block entities across 400 chunks, 4 colour passes; 442+442 measured ticks (8 skipped/phase, 6 phases interleaved)"
+          },
+          {
+            "name": "p2_be_sharding_control_mspt_serial",
+            "value": 1.0022,
+            "unit": "ms/tick",
+            "extra": "vanilla getAverageTickTimeNanos, blockEntitySharding OFF; ONE region, 1600 ticking block entities across 400 chunks, 4 colour passes; 442+442 measured ticks (8 skipped/phase, 6 phases interleaved)"
+          },
+          {
+            "name": "p2_be_sharding_control_mspt_sharded",
+            "value": 0.718,
+            "unit": "ms/tick",
+            "extra": "vanilla getAverageTickTimeNanos, blockEntitySharding ON; 1.40x full-tick (Amdahl-bounded by the rest of the tick); ONE region, 1600 ticking block entities across 400 chunks, 4 colour passes; 442+442 measured ticks (8 skipped/phase, 6 phases interleaved)"
+          },
+          {
+            "name": "spawn_density_live_spawns",
+            "value": 71,
+            "unit": "mobs",
+            "extra": "monsters spawned through the authoritative SpawnState in 150 ticks (doMobSpawning on, midnight); 129 ticks served async"
+          },
+          {
+            "name": "ws2_stress_entity_phase_sync_pathfinding",
+            "value": 9.2146,
+            "unit": "ms/tick",
+            "extra": "300-zombie maze horde, async pathfinding OFF (baseline)"
+          },
+          {
+            "name": "ws2_stress_entity_phase_async_pathfinding",
+            "value": 5.9548,
+            "unit": "ms/tick",
+            "extra": "35.4% entity-phase reduction on the WS-2 acceptance world (300 zombies, sealed-keep maze, every repath runs to the A* node budget); 4981 requests routed off-thread, 300 measured ticks/phase"
+          },
+          {
+            "name": "p2_be_sharding_section_serial",
+            "value": 0.2672,
+            "unit": "ms/tick",
+            "extra": "median block-entity-section wall time, blockEntitySharding OFF; p95 0.804 ms; ONE region, 1600 ticking block entities across 400 chunks, 4 colour passes; 442+442 measured ticks (8 skipped/phase, 6 phases interleaved)"
+          },
+          {
+            "name": "p2_be_sharding_section_sharded",
+            "value": 0.5033,
+            "unit": "ms/tick",
+            "extra": "median block-entity-section wall time, blockEntitySharding ON; p95 1.093 ms; 0.53x vs serial (p95 0.74x); 2280 shard passes over 288420 units, max 36 concurrent chunks; ONE region, 1600 ticking block entities across 400 chunks, 4 colour passes; 442+442 measured ticks (8 skipped/phase, 6 phases interleaved)"
+          },
+          {
+            "name": "p2_be_sharding_mspt_serial",
+            "value": 0.7821,
+            "unit": "ms/tick",
+            "extra": "vanilla getAverageTickTimeNanos, blockEntitySharding OFF; ONE region, 1600 ticking block entities across 400 chunks, 4 colour passes; 442+442 measured ticks (8 skipped/phase, 6 phases interleaved)"
+          },
+          {
+            "name": "p2_be_sharding_mspt_sharded",
+            "value": 1.1274,
+            "unit": "ms/tick",
+            "extra": "vanilla getAverageTickTimeNanos, blockEntitySharding ON; 0.69x full-tick (Amdahl-bounded by the rest of the tick); ONE region, 1600 ticking block entities across 400 chunks, 4 colour passes; 442+442 measured ticks (8 skipped/phase, 6 phases interleaved)"
+          },
+          {
+            "name": "p2_parallel_regions_control_entity_section_serial",
+            "value": 26.8591,
+            "unit": "ms/tick",
+            "extra": "median entity-section wall time, partitionedTicking ON / parallelRegions OFF; p95 30.223 ms; 1 region(s), 1760 mobs, 1-1 buckets/section; 442+442 measured ticks (8 skipped/phase, 6 phases interleaved)"
+          },
+          {
+            "name": "p2_parallel_regions_control_entity_section_parallel",
+            "value": 25.6011,
+            "unit": "ms/tick",
+            "extra": "median entity-section wall time, parallelRegions ON; p95 28.783 ms; 1.05x vs serial (p95 1.05x); 0 worker threads seen; 1 region(s), 1760 mobs, 1-1 buckets/section; 442+442 measured ticks (8 skipped/phase, 6 phases interleaved)"
+          },
+          {
+            "name": "p2_parallel_regions_control_mspt_serial",
+            "value": 28.4144,
+            "unit": "ms/tick",
+            "extra": "vanilla getAverageTickTimeNanos, parallelRegions OFF; 1 region(s), 1760 mobs, 1-1 buckets/section; 442+442 measured ticks (8 skipped/phase, 6 phases interleaved)"
+          },
+          {
+            "name": "p2_parallel_regions_control_mspt_parallel",
+            "value": 27.3698,
+            "unit": "ms/tick",
+            "extra": "vanilla getAverageTickTimeNanos, parallelRegions ON; 1.04x full-tick (Amdahl-bounded by the rest of the tick); 1 region(s), 1760 mobs, 1-1 buckets/section; 442+442 measured ticks (8 skipped/phase, 6 phases interleaved)"
+          },
+          {
+            "name": "p2_parallel_regions_entity_section_serial",
+            "value": 26.9932,
+            "unit": "ms/tick",
+            "extra": "median entity-section wall time, partitionedTicking ON / parallelRegions OFF; p95 30.573 ms; 8 region(s), 1760 mobs, 8-8 buckets/section; 442+442 measured ticks (8 skipped/phase, 6 phases interleaved)"
+          },
+          {
+            "name": "p2_parallel_regions_entity_section_parallel",
+            "value": 14.524,
+            "unit": "ms/tick",
+            "extra": "median entity-section wall time, parallelRegions ON; p95 20.853 ms; 1.86x vs serial (p95 1.47x); 2 worker threads seen; 8 region(s), 1760 mobs, 8-8 buckets/section; 442+442 measured ticks (8 skipped/phase, 6 phases interleaved)"
+          },
+          {
+            "name": "p2_parallel_regions_mspt_serial",
+            "value": 29.9955,
+            "unit": "ms/tick",
+            "extra": "vanilla getAverageTickTimeNanos, parallelRegions OFF; 8 region(s), 1760 mobs, 8-8 buckets/section; 442+442 measured ticks (8 skipped/phase, 6 phases interleaved)"
+          },
+          {
+            "name": "p2_parallel_regions_mspt_parallel",
+            "value": 17.5912,
+            "unit": "ms/tick",
+            "extra": "vanilla getAverageTickTimeNanos, parallelRegions ON; 1.71x full-tick (Amdahl-bounded by the rest of the tick); 8 region(s), 1760 mobs, 8-8 buckets/section; 442+442 measured ticks (8 skipped/phase, 6 phases interleaved)"
+          },
+          {
+            "name": "loadgen_fresh_chunk_load",
+            "value": 9.2265,
+            "unit": "ms/chunk",
+            "extra": "bot walked 192 fresh chunks to FULL status, flat world"
+          },
+          {
+            "name": "p1_end_to_end_mspt_vanilla",
+            "value": 32.6054,
+            "unit": "ms/tick",
+            "extra": "full-tick MSPT, all P1 services off; p95 36.183 ms; 2500 countable passive mobs, 300 measured ticks"
+          },
+          {
+            "name": "p1_end_to_end_mspt_p1_services",
+            "value": 31.5836,
+            "unit": "ms/tick",
+            "extra": "3.1% full-tick MSPT reduction with P1 services at shipping defaults (spawn-density AUTHORITATIVE incl. verify ticks, asyncPathfinding=true); p95 34.394 ms; 18/300 ticks served async"
           }
         ]
       }
