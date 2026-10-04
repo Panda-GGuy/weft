@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791019229756,
+  "lastUpdate": 1791107914105,
   "repoUrl": "https://github.com/Panda-GGuy/weft",
   "entries": {
     "Weft JMH": [
@@ -5478,6 +5478,118 @@ window.BENCHMARK_DATA = {
           {
             "name": "dev.weft.services.jmh.PathfindingBench.longPathHierarchical",
             "value": 618.7510280694939,
+            "unit": "us/op",
+            "extra": "iterations: 5\nforks: 1\nthreads: 1"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "name": "Panda-GGuy",
+            "username": "Panda-GGuy",
+            "email": "218838703+Panda-GGuy@users.noreply.github.com"
+          },
+          "committer": {
+            "name": "GitHub",
+            "username": "web-flow",
+            "email": "noreply@github.com"
+          },
+          "id": "7270a365a10139456987b7158c500f0a974fee7e",
+          "message": "Merge pull request #28 from Panda-GGuy/crew/lead-state-h24\n\ndocs(crew): record the abandoned-gate and rebase-conflict lessons",
+          "timestamp": "2026-08-21T06:24:15Z",
+          "url": "https://github.com/Panda-GGuy/weft/commit/7270a365a10139456987b7158c500f0a974fee7e"
+        },
+        "date": 1791107913468,
+        "tool": "jmh",
+        "benches": [
+          {
+            "name": "dev.weft.engine.jmh.EntityShardingBench.serialOneRegion",
+            "value": 2562.4104921896424,
+            "unit": "us/op",
+            "extra": "iterations: 5\nforks: 1\nthreads: 1"
+          },
+          {
+            "name": "dev.weft.engine.jmh.EntityShardingBench.shardedOneRegion",
+            "value": 913.7608884476251,
+            "unit": "us/op",
+            "extra": "iterations: 5\nforks: 1\nthreads: 1"
+          },
+          {
+            "name": "dev.weft.engine.jmh.GraphCommitBench.computeAndRoute",
+            "value": 75.83496076397034,
+            "unit": "us/op",
+            "extra": "iterations: 5\nforks: 1\nthreads: 1"
+          },
+          {
+            "name": "dev.weft.engine.jmh.MailboxBench.post256Drain",
+            "value": 4.04875992413526,
+            "unit": "us/op",
+            "extra": "iterations: 5\nforks: 1\nthreads: 1"
+          },
+          {
+            "name": "dev.weft.engine.jmh.PipelineTickBench.emptyRegions",
+            "value": 60.30556030296558,
+            "unit": "us/op",
+            "extra": "iterations: 5\nforks: 1\nthreads: 1"
+          },
+          {
+            "name": "dev.weft.engine.jmh.PipelineTickBench.tinyWork",
+            "value": 60.732266717279586,
+            "unit": "us/op",
+            "extra": "iterations: 5\nforks: 1\nthreads: 1"
+          },
+          {
+            "name": "dev.weft.engine.jmh.RegionChurnStormBench.pregenChurnStorm",
+            "value": 122.44129588888889,
+            "unit": "ms/op",
+            "extra": "iterations: 5\nforks: 1\nthreads: 1"
+          },
+          {
+            "name": "dev.weft.engine.jmh.RegionMergeSplitBench.mergeChainThenSplit",
+            "value": 67.82055379170575,
+            "unit": "us/op",
+            "extra": "iterations: 5\nforks: 1\nthreads: 1"
+          },
+          {
+            "name": "dev.weft.services.jmh.ActivationPhaseBench.entityPhase ( {\"throttled\":\"false\"} )",
+            "value": 981.9387869963091,
+            "unit": "us/op",
+            "extra": "iterations: 5\nforks: 1\nthreads: 1"
+          },
+          {
+            "name": "dev.weft.services.jmh.ActivationPhaseBench.entityPhase ( {\"throttled\":\"true\"} )",
+            "value": 272.0005322270727,
+            "unit": "us/op",
+            "extra": "iterations: 5\nforks: 1\nthreads: 1"
+          },
+          {
+            "name": "dev.weft.services.jmh.ActivationSchedulerBench.decisionNearMidFar",
+            "value": 23.911292518753736,
+            "unit": "ns/op",
+            "extra": "iterations: 5\nforks: 1\nthreads: 1"
+          },
+          {
+            "name": "dev.weft.services.jmh.PathfindingBench.hordeFlowField",
+            "value": 13150.66785755934,
+            "unit": "us/op",
+            "extra": "iterations: 5\nforks: 1\nthreads: 1"
+          },
+          {
+            "name": "dev.weft.services.jmh.PathfindingBench.hordePerMobAStar",
+            "value": 60625.14060713013,
+            "unit": "us/op",
+            "extra": "iterations: 5\nforks: 1\nthreads: 1"
+          },
+          {
+            "name": "dev.weft.services.jmh.PathfindingBench.longPathFlatGrid",
+            "value": 19795.985180508644,
+            "unit": "us/op",
+            "extra": "iterations: 5\nforks: 1\nthreads: 1"
+          },
+          {
+            "name": "dev.weft.services.jmh.PathfindingBench.longPathHierarchical",
+            "value": 781.1249297331926,
             "unit": "us/op",
             "extra": "iterations: 5\nforks: 1\nthreads: 1"
           }
